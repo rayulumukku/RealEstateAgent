@@ -65,9 +65,10 @@ function utf8(s: string): Uint8Array {
 }
 
 async function getHmacKey(): Promise<CryptoKey> {
+  const keyData = getSecretBytes();
   return crypto.subtle.importKey(
     "raw",
-    getSecretBytes(),
+    keyData.buffer as ArrayBuffer,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign", "verify"]
@@ -95,7 +96,8 @@ export async function signSession(
   const signingInput = `${headerB64}.${payloadB64}`;
 
   const key = await getHmacKey();
-  const sig = await crypto.subtle.sign("HMAC", key, utf8(signingInput));
+  const sigInput = utf8(signingInput);
+  const sig = await crypto.subtle.sign("HMAC", key, sigInput.buffer as ArrayBuffer);
   return `${signingInput}.${bytesToBase64Url(new Uint8Array(sig))}`;
 }
 
@@ -131,7 +133,8 @@ export async function verifySession(
 
   let valid: boolean;
   try {
-    valid = await crypto.subtle.verify("HMAC", key, providedSig, utf8(signingInput));
+    const sigInputBytes = utf8(signingInput);
+    valid = await crypto.subtle.verify("HMAC", key, providedSig.buffer as ArrayBuffer, sigInputBytes.buffer as ArrayBuffer);
   } catch {
     return null;
   }
@@ -174,7 +177,7 @@ export function generateOtp(): string {
 
 export async function hashOtp(otp: string, salt: string): Promise<string> {
   const data = utf8(`${salt}${otp}`);
-  const hash = await crypto.subtle.digest("SHA-256", data);
+  const hash = await crypto.subtle.digest("SHA-256", data.buffer as ArrayBuffer);
   return bytesToHex(new Uint8Array(hash));
 }
 
