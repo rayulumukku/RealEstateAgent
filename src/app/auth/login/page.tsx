@@ -121,7 +121,6 @@ function LoginContent() {
       if (result.status === "logged_in") {
         // Cookie is now set by the server action. Set localStorage keys
         // for legacy client code in dashboards that still reads from them.
-        // (PR #4 will rewrite those reads to use /api/me instead.)
         try {
           localStorage.setItem("agentsapp_logged_in_phone", result.user.phone);
           localStorage.setItem("agentsapp_logged_in_user", result.user.name);
@@ -129,12 +128,11 @@ function LoginContent() {
         } catch {
           /* private mode — ignore */
         }
-        // Use a HARD navigation (full page load) instead of router.push so
-        // the just-set Set-Cookie header is committed and sent on the very
-        // next request to the protected dashboard. Soft navigation via
-        // router.push has been observed to race with cookie commit on
-        // Vercel and end up bouncing the user back through middleware.
-        const target = next || result.redirect;
+        // ALWAYS use the server's role-based redirect. The ?next= parameter
+        // is unreliable — it may point to /agent/dashboard even when the
+        // user selected Admin or Builder, because middleware sets it based
+        // on whichever protected route was visited before login.
+        const target = result.redirect;
         window.location.assign(target);
         return;
       }
