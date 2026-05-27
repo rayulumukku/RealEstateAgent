@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { sessionCookieName, verifySession } from "@/lib/session";
 
 // -----------------------------------------------------------------------------
-// Route protection.
+// Route protection (Next.js 16 "proxy" — formerly "middleware").
 //
 // Anything under /agent, /builder or /admin requires a valid session cookie.
 // Unauthenticated requests are redirected to /auth/login with the original
@@ -39,7 +39,7 @@ function isAllowed(role: string, pathname: string): boolean {
   return true;
 }
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const { pathname, search } = req.nextUrl;
 
   const isProtected = PROTECTED_PREFIXES.some((p) => pathname.startsWith(p));
