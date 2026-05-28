@@ -2,7 +2,7 @@
 
 import { cookies, headers } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { sendWhatsAppText } from "@/lib/gallabox";
+import { sendWhatsAppText, sendWhatsAppOTP } from "@/lib/gallabox";
 import {
   generateOtp,
   hashOtp,
@@ -220,9 +220,9 @@ async function requestOtpImpl(input: RequestOtpInput): Promise<RequestOtpResult>
     return { ok: false, error: explainSupabaseError(insertErr, "otp_sessions") };
   }
 
-  // Deliver via WhatsApp through GallaBox.
-  const message = `*AgentsApp* login code: *${otp}*\n\nValid for 10 minutes. Do not share this code with anyone.`;
-  const sendResult = await sendWhatsAppText(phone, message);
+  // Deliver via WhatsApp through GallaBox using template (works for ALL users,
+  // not just those who previously messaged the business number).
+  const sendResult = await sendWhatsAppOTP(phone, otp);
 
   // In dev we don't require GallaBox to be configured — log the OTP so the
   // developer can grab it from the server console.

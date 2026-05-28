@@ -356,28 +356,68 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "success", reply: replyRegPrompt });
     }
 
-    if (commandLower === "help" || commandLower === "commands" || commandLower === "hi" || commandLower === "hello") {
-      const helpMsg = `🤖 *AgentsApp WhatsApp Bot Menu*\n\n` +
-        `Manage your real estate CRM with simple commands:\n\n` +
-        `1. 🆕 *Add Lead*:\n` +
-        `   _"aa Add Ravi looking for 3BHK"_ or _"aa Add lead Amit phone 9912345678"_\n\n` +
-        `2. ⏰ *Set Reminder*:\n` +
-        `   _"aa Remind me tomorrow to call Ramesh"_\n\n` +
-        `3. ⚡ *Update Lead Status*:\n` +
-        `   _"aa Amit site visit"_ or _"aa Ramesh Kumar closed"_\n\n` +
-        `4. 🏢 *Search Inventory*:\n` +
-        `   _"aa Show east-facing plots"_ or _"aa Search 3BHK Kokapet"_\n\n` +
-        `5. 📁 *Request Brochure*:\n` +
-        `   _"aa Send Skyline brochure"_ or _"aa Green Meadows layout"_\n\n` +
-        `6. 📋 *View Leads List*:\n` +
-        `   _"aa My leads"_ or _"aa Show all leads"_\n\n` +
-        `7. 🔍 *Search Lead Card*:\n` +
-        `   _"aa Search Ramesh"_ or _"aa Find Amit"_\n\n` +
-        `8. 🚀 *Upcoming Launches*:\n` +
-        `   _"aa Upcoming launches"_ or _"aa launches"_\n\n` +
-        `9. 🎥 *Register Webinar*:\n` +
-        `   _"aa Register webinar"_ or _"aa webinars"_\n\n` +
-        `👉 Remember to prefix your commands with *aa* when chatting on WhatsApp!`;
+    if (commandLower === "help" || commandLower === "commands" || commandLower === "hi" || commandLower === "hello" || commandLower === "menu") {
+      // Role-based menu: show different options depending on agent/builder/admin
+      let helpMsg = "";
+
+      if (profile.role === "builder") {
+        helpMsg = `🤖 *AgentsApp Builder Menu*\n\n` +
+          `👋 Welcome *${profile.name}* (${profile.agency_name || "Builder"})!\n\n` +
+          `Manage your projects and campaigns:\n\n` +
+          `1. 🚀 *Upcoming Launches*:\n` +
+          `   _"aa launches"_ — view all scheduled launches\n\n` +
+          `2. 🎥 *Register Webinar*:\n` +
+          `   _"aa webinars"_ — view/register broker webinars\n\n` +
+          `3. 👥 *My Agents*:\n` +
+          `   _"aa my agents"_ — list registered channel partners\n\n` +
+          `4. 🏢 *Search Inventory*:\n` +
+          `   _"aa inventory"_ — view your project units\n\n` +
+          `5. 📁 *Brochures*:\n` +
+          `   _"aa brochure [project]"_ — send brochure to brokers\n\n` +
+          `6. 📊 *Campaign Stats*:\n` +
+          `   _"aa stats"_ — view campaign analytics\n\n` +
+          `👉 Prefix all commands with *aa*`;
+      } else if (profile.role === "admin" || profile.role === "verification" || profile.role === "operations") {
+        helpMsg = `🤖 *AgentsApp Admin Menu*\n\n` +
+          `👋 Welcome *${profile.name}* (Admin)!\n\n` +
+          `Full platform access:\n\n` +
+          `📊 *Analytics & Reports*\n` +
+          `1. _"aa agents"_ — list all registered agents\n` +
+          `2. _"aa leads"_ — total lead count across platform\n` +
+          `3. _"aa stats"_ — platform-wide analytics\n\n` +
+          `👥 *Agent Management*\n` +
+          `4. _"aa pending"_ — view pending verifications\n` +
+          `5. _"aa approve [name]"_ — approve an agent\n` +
+          `6. _"aa reject [name]"_ — reject an agent\n\n` +
+          `🏢 *Inventory & Projects*\n` +
+          `7. _"aa inventory"_ — search all inventory\n` +
+          `8. _"aa projects"_ — list all projects\n\n` +
+          `📅 *Events*\n` +
+          `9. _"aa launches"_ — upcoming events\n` +
+          `10. _"aa webinars"_ — active webinars\n\n` +
+          `👉 Prefix all commands with *aa*`;
+      } else {
+        // Default: Agent/Broker menu
+        helpMsg = `🤖 *AgentsApp Agent Menu*\n\n` +
+          `👋 Welcome *${profile.name}* (${profile.agency_name || "Agent"})!\n` +
+          `🆔 CP ID: *${profile.cp_id || "Pending"}*\n\n` +
+          `Manage your CRM:\n\n` +
+          `📋 *Leads*\n` +
+          `1. _"aa Add [Name] looking for [BHK]"_ — add lead\n` +
+          `2. _"aa My leads"_ — view all your leads\n` +
+          `3. _"aa Search [Name]"_ — find a specific lead\n` +
+          `4. _"aa [Name] site visit"_ — update lead status\n\n` +
+          `⏰ *Reminders*\n` +
+          `5. _"aa Remind me to call [Name] time [date]"_ — set reminder\n\n` +
+          `🏢 *Inventory*\n` +
+          `6. _"aa Search 3BHK Kokapet"_ — search units\n` +
+          `7. _"aa brochure [project]"_ — get brochure PDF\n\n` +
+          `📅 *Events*\n` +
+          `8. _"aa launches"_ — upcoming events & meets\n` +
+          `9. _"aa webinars"_ — register for webinars\n\n` +
+          `👉 Prefix all commands with *aa*`;
+      }
+
       await sendOutboundReply(helpMsg);
       return NextResponse.json({ status: "success", reply: helpMsg });
     }
@@ -825,8 +865,101 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "success", reply: replyMsg.trim() });
     }
 
+    // 11. ADMIN: LIST ALL AGENTS
+    if ((profile.role === "admin" || profile.role === "verification" || profile.role === "operations") &&
+        (commandLower === "agents" || commandLower === "all agents")) {
+      const { data: agents, count } = await supabase
+        .from("profiles")
+        .select("name, phone, status, agency_name", { count: "exact" })
+        .eq("role", "agent")
+        .order("created_at", { ascending: false })
+        .limit(15);
+
+      let replyMsg = `🤖 *All Registered Agents* (${count || 0} total)\n\n`;
+      (agents || []).forEach((a: any, idx: number) => {
+        const statusEmoji = a.status === "approved" ? "✅" : a.status === "pending" ? "⏳" : "❌";
+        replyMsg += `${idx + 1}. ${statusEmoji} *${a.name}*\n   📱 ${a.phone} | 🏢 ${a.agency_name || "N/A"}\n\n`;
+      });
+      await sendOutboundReply(replyMsg.trim());
+      return NextResponse.json({ status: "success", reply: replyMsg.trim() });
+    }
+
+    // 12. ADMIN: PENDING VERIFICATIONS
+    if ((profile.role === "admin" || profile.role === "verification") &&
+        commandLower === "pending") {
+      const { data: pending } = await supabase
+        .from("profiles")
+        .select("name, phone, agency_name, rera_number")
+        .eq("role", "agent")
+        .eq("status", "pending")
+        .order("created_at", { ascending: false });
+
+      if (!pending || pending.length === 0) {
+        const reply = "🤖 Bot: No pending verifications. All caught up! ✅";
+        await sendOutboundReply(reply);
+        return NextResponse.json({ status: "success", reply });
+      }
+
+      let replyMsg = `🤖 *Pending Verifications* (${pending.length})\n\n`;
+      pending.forEach((a: any, idx: number) => {
+        replyMsg += `${idx + 1}. ⏳ *${a.name}*\n   📱 ${a.phone}\n   🏢 ${a.agency_name || "N/A"}\n   📄 RERA: ${a.rera_number || "N/A"}\n\n`;
+      });
+      replyMsg += `👉 Type _"aa approve [name]"_ or _"aa reject [name]"_ to action.`;
+      await sendOutboundReply(replyMsg.trim());
+      return NextResponse.json({ status: "success", reply: replyMsg.trim() });
+    }
+
+    // 13. ADMIN: PLATFORM STATS
+    if ((profile.role === "admin" || profile.role === "builder") &&
+        (commandLower === "stats" || commandLower === "analytics")) {
+      const { count: agentCount } = await supabase
+        .from("profiles")
+        .select("*", { count: "exact", head: true })
+        .eq("role", "agent");
+
+      const { count: leadCount } = await supabase
+        .from("leads")
+        .select("*", { count: "exact", head: true });
+
+      const { count: eventCount } = await supabase
+        .from("events")
+        .select("*", { count: "exact", head: true });
+
+      const replyMsg = `🤖 *Platform Stats*\n\n` +
+        `👥 Total Agents: *${agentCount || 0}*\n` +
+        `📊 Total Leads: *${leadCount || 0}*\n` +
+        `📅 Total Events: *${eventCount || 0}*\n`;
+      await sendOutboundReply(replyMsg.trim());
+      return NextResponse.json({ status: "success", reply: replyMsg.trim() });
+    }
+
+    // 14. BUILDER: MY AGENTS
+    if (profile.role === "builder" &&
+        (commandLower === "my agents" || commandLower === "agents")) {
+      const { data: agents } = await supabase
+        .from("profiles")
+        .select("name, phone, agency_name, status")
+        .eq("role", "agent")
+        .eq("status", "approved")
+        .order("created_at", { ascending: false })
+        .limit(20);
+
+      if (!agents || agents.length === 0) {
+        const reply = "🤖 Bot: No registered agents found.";
+        await sendOutboundReply(reply);
+        return NextResponse.json({ status: "success", reply });
+      }
+
+      let replyMsg = `🤖 *Registered Channel Partners* (${agents.length})\n\n`;
+      agents.forEach((a: any, idx: number) => {
+        replyMsg += `${idx + 1}. ✅ *${a.name}*\n   📱 ${a.phone} | 🏢 ${a.agency_name || "N/A"}\n\n`;
+      });
+      await sendOutboundReply(replyMsg.trim());
+      return NextResponse.json({ status: "success", reply: replyMsg.trim() });
+    }
+
     // Default/Fallback help menu
-    const helpMsg = `🤖 Bot: I didn't catch that command. Type *help* to see all available commands.`;
+    const helpMsg = `🤖 Bot: I didn't catch that command. Type *aa help* to see all available commands.`;
     await sendOutboundReply(helpMsg);
     return NextResponse.json({ status: "success", reply: helpMsg });
   } catch (err: any) {

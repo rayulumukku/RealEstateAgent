@@ -83,3 +83,97 @@ export async function sendWhatsAppText(
     };
   }
 }
+
+
+
+// -----------------------------------------------------------------------------
+// Template-based message for OTP delivery.
+//
+// WhatsApp Business API requires approved templates to initiate conversations
+// with users who haven't previously messaged your number. This function sends
+// the OTP via a pre-approved template so ALL users (not just existing contacts)
+// receive it.
+//
+// Template setup in GallaBox:
+//   - Go to GallaBox → Templates → Create
+//   - Category: Authentication (or Utility)
+//   - Name: set via GALLABOX_OTP_TEMPLATE env var (default: "otp_login")
+//   - Body: "Your AgentsApp login code is {{1}}. Valid for 10 minutes."
+//   - Submit for approval
+//
+// If the template isn't set up, this falls back to sendWhatsAppText.
+// -----------------------------------------------------------------------------
+
+export async function sendWhatsAppOTP(
+  rawPhone: string,
+  otp: string,
+  recipientName: string = "User"
+): Promise<GallaBoxSendResult> {
+  const apiKey = process.env.GALLABOX_API_KEY;
+  const apiSecret = process.env.GALLABOX_API_SECRET;
+  const channelId = process.env.GALLABOX_CHANNEL_ID;
+  const templateName = process.env.GALLABOX_OTP_TEMPLATE;
+
+  if (!apiKey || !apiSecret || !channelId) {
+    return {
+      ok: false,
+      status: null,
+      responseBody: null,
+      error: "GallaBox not configured (GALLABOX_API_KEY/SECRET/CHANNEL_ID missing)",
+    };
+  }
+
+  const cleanPhone = rawPhone.replace(/\D/g, "");
+  const finalPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+
+  // If no template configured, fall back to plain text
+  // (this will only work for users who already have a conversation)
+  if (!templateName) {
+    const fallbackBody = `*AgentsApp* login code: *${otp}*\n\nValid for 10 minutes. Do not share this code with anyone.`;
+    return sendWhatsAppText(rawPhone, fallbackBody, recipientName);
+  }
+
+  try {
+    const res = await fetch("https://server.gallabox.com/devapi/messages/whatsapp", {
+      method: "POST",
+      headers: {
+        apiKey: apiKey,
+        apiSecret: apiSecret,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        channelId,
+        channelType: "whatsapp",
+        recipient: { name: recipientName, phone: finalPhone },
+        whatsapp: {
+          type: "template",
+          template: {
+            templateName: templateName,
+            bodyValues: { "1": otp },
+          },
+        },
+      }),
+    });
+
+    let responseBody: unknown = null;
+    try {
+      responseBody = await res.json();
+    } catch {
+      // empty body
+    }
+
+    return {
+      ok: res.ok,
+      status: res.status,
+      responseBody,
+      error: res.ok ? undefined : `GallaBox template HTTP ${res.status}`,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      status: null,
+      responseBody: null,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
