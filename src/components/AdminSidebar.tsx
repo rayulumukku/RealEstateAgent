@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { 
-  CheckSquare, BarChart2, LogOut, RefreshCw, User, Building2, Calendar, Activity, Users
+  CheckSquare, BarChart2, LogOut, RefreshCw, User
 } from "lucide-react";
 import { performLogout } from "@/components/SessionSync";
 

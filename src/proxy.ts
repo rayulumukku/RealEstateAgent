@@ -16,14 +16,10 @@ import { sessionCookieName, verifySession } from "@/lib/session";
 // to their own dashboard rather than showing a confusing 403.
 // -----------------------------------------------------------------------------
 
-const PROTECTED_PREFIXES = ["/agent", "/builder", "/super-builder", "/super-admin", "/admin"] as const;
+const PROTECTED_PREFIXES = ["/agent", "/builder", "/admin"] as const;
 
 function dashboardForRole(role: string): string {
   switch (role) {
-    case "super_admin":
-      return "/super-admin/dashboard";
-    case "super_builder":
-      return "/super-builder/dashboard";
     case "builder":
       return "/builder/dashboard";
     case "admin":
@@ -36,12 +32,10 @@ function dashboardForRole(role: string): string {
 }
 
 function isAllowed(role: string, pathname: string): boolean {
-  if (pathname.startsWith("/super-admin")) return role === "super_admin";
   if (pathname.startsWith("/admin"))
-    return role === "admin" || role === "verification" || role === "operations" || role === "super_admin";
-  if (pathname.startsWith("/super-builder")) return role === "super_builder" || role === "super_admin";
-  if (pathname.startsWith("/builder")) return role === "builder" || role === "super_builder" || role === "super_admin";
-  if (pathname.startsWith("/agent")) return role === "agent" || role === "super_admin";
+    return role === "admin" || role === "verification" || role === "operations";
+  if (pathname.startsWith("/builder")) return role === "builder";
+  if (pathname.startsWith("/agent")) return role === "agent";
   return true;
 }
 
@@ -74,5 +68,5 @@ export async function proxy(req: NextRequest) {
 export const config = {
   // Match everything under the protected sections. Excludes /api, /_next,
   // /auth, /favicon, and static assets so we don't run on every request.
-  matcher: ["/agent/:path*", "/builder/:path*", "/super-builder/:path*", "/super-admin/:path*", "/admin/:path*"],
+  matcher: ["/agent/:path*", "/builder/:path*", "/admin/:path*"],
 };

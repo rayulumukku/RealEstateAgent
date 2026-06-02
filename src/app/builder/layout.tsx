@@ -3,7 +3,6 @@
 import { useEffect, useState, useRef } from "react";
 import BuilderSidebar from "@/components/BuilderSidebar";
 import SessionSync from "@/components/SessionSync";
-import WarningPopup from "@/components/WarningPopup";
 import { Clock, XCircle, Loader2, Upload, CheckCircle2, Building2 } from "lucide-react";
 import { performLogout } from "@/components/SessionSync";
 
@@ -241,7 +240,6 @@ export default function BuilderLayout({
   return (
     <div className="flex h-screen bg-[#070b13] overflow-hidden">
       <SessionSync />
-      <WarningPopup />
       <BuilderSidebar />
       <main className="flex-1 overflow-y-auto p-8 text-slate-100">
         {children}

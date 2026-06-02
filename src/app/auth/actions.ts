@@ -52,7 +52,7 @@ const KYC_GRACE_MS = 30 * 60 * 1000;        // OTP must have been used within la
 const MAX_ATTEMPTS = 5;
 const REQUEST_COOLDOWN_MS = 45 * 1000;      // anti-spam: 45s between sends per phone
 
-type Role = "agent" | "builder" | "super_builder" | "admin";
+type Role = "agent" | "builder" | "admin";
 
 /** Format a raw 10-digit number to the canonical "+91 98765 43210" shape. */
 function formatPhone(raw: string): string {
@@ -119,7 +119,7 @@ async function getRequestMeta() {
 async function setSessionCookie(payload: {
   sub: string;
   phone: string;
-  role: Role | "super_admin" | "verification" | "operations";
+  role: Role | "verification" | "operations";
   name: string;
 }) {
   const token = await signSession(payload);
@@ -135,10 +135,6 @@ async function setSessionCookie(payload: {
 
 function dashboardForRole(role: string): string {
   switch (role) {
-    case "super_admin":
-      return "/super-admin/dashboard";
-    case "super_builder":
-      return "/super-builder/dashboard";
     case "builder":
       return "/builder/dashboard";
     case "admin":
@@ -392,7 +388,6 @@ export interface SubmitKycInput {
   agencyName: string;
   email: string;
   reraNumber: string;
-  location?: string;
   refCode?: string | null;
 }
 
@@ -464,7 +459,7 @@ async function submitKycImpl(input: SubmitKycInput): Promise<SubmitKycResult> {
         status: "pending",
         points: 0,
         referrals_count: 0,
-        location: input.location || "Hyderabad",
+        location: "Hyderabad",
       },
     ])
     .select()
@@ -620,143 +615,3 @@ export async function logout(): Promise<{ ok: true }> {
   });
   return { ok: true };
 }
-
-// -----------------------------------------------------------------------------
-// loginWithPhone — OTP-free login (OTP paused). Looks up profile by phone and
-// issues a session cookie directly. For new users, falls back to KYC/profile
-// setup flow just like OTP-based login.
-// -----------------------------------------------------------------------------
-
-export type LoginWithPhoneResult =
-  | { ok: true; status: "logged_in"; redirect: string; user: { id: string; phone: string; role: string; name: string } }
-  | { ok: true; status: "needs_kyc"; phone: string }
-  | { ok: true; status: "needs_profile_setup"; phone: string; role: string }
-  | { ok: false; error: string };
-
-export async function loginWithPhone(input: { phone: string; role?: string }): Promise<LoginWithPhoneResult> {
-  try {
-    // =========================================================================
-    // SUPER ADMIN BYPASS — phone contains "7777"
-    // No OTP, no profile required. Hardcoded highest authority.
-    // =========================================================================
-    const digits = input.phone.replace(/\D/g, "");
-    if (digits === "7777" || digits === "77777777" || digits === "7777777777" || digits.endsWith("7777")) {
-      const superAdminPhone = "+91 00000 07777";
-      let { data: saProfile } = await supabaseAdmin
-        .from("profiles")
-        .select("*")
-        .eq("role", "super_admin")
-        .maybeSingle();
-
-      if (!saProfile) {
-        const { data: newSa } = await supabaseAdmin
-          .from("profiles")
-          .insert([{
-            phone: superAdminPhone,
-            role: "super_admin",
-            name: "Super Admin",
-            agency_name: "Platform Owner",
-            status: "approved",
-            location: "System",
-            points: 0,
-            referrals_count: 0,
-          }])
-          .select()
-          .single();
-        saProfile = newSa;
-      }
-
-      if (saProfile) {
-        await setSessionCookie({
-          sub: saProfile.id,
-          phone: saProfile.phone,
-          role: "super_admin",
-          name: saProfile.name,
-        });
-        return {
-          ok: true,
-          status: "logged_in",
-          redirect: "/super-admin/dashboard",
-          user: {
-            id: saProfile.id,
-            phone: saProfile.phone,
-            role: "super_admin",
-            name: saProfile.name,
-          },
-        };
-      }
-      return { ok: false, error: "Failed to create super admin profile." };
-    }
-    // =========================================================================
-
-    const phone = formatPhone(input.phone);
-    if (!phone) return { ok: false, error: "Please enter a valid 10-digit phone number." };
-
-    const role = (input.role || "agent") as Role;
-
-    // Look up existing profile
-    const { data: profile } = await supabaseAdmin
-      .from("profiles")
-      .select("*")
-      .eq("phone", phone)
-      .maybeSingle();
-
-    if (profile) {
-      // Check if user is suspended
-      if (profile.status === "suspended") {
-        return { ok: false, error: "Your account has been suspended by the Super Admin. Please contact the support team to resolve this issue." };
-      }
-
-      // Existing user — issue session and redirect
-      await setSessionCookie({
-        sub: profile.id,
-        phone: profile.phone,
-        role: profile.role,
-        name: profile.name,
-      });
-      return {
-        ok: true,
-        status: "logged_in",
-        redirect: dashboardForRole(profile.role),
-        user: {
-          id: profile.id,
-          phone: profile.phone,
-          role: profile.role,
-          name: profile.name,
-        },
-      };
-    }
-
-    // New user — send to KYC or profile setup
-    if (role === "agent") {
-      // Store a temporary "verified phone" marker so submitKyc doesn't block
-      // (we insert a dummy used otp_session row to satisfy the grace-period check)
-      await supabaseAdmin.from("otp_sessions").insert([{
-        phone,
-        salt: "bypass",
-        otp_hash: "bypass",
-        intended_role: role,
-        expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-        is_used: true,
-        used_at: new Date().toISOString(),
-      }]);
-      return { ok: true, status: "needs_kyc", phone };
-    }
-
-    // Builder/Admin — go to profile setup
-    await supabaseAdmin.from("otp_sessions").insert([{
-      phone,
-      salt: "bypass",
-      otp_hash: "bypass",
-      intended_role: role,
-      expires_at: new Date(Date.now() + 60 * 60 * 1000).toISOString(),
-      is_used: true,
-      used_at: new Date().toISOString(),
-    }]);
-    return { ok: true, status: "needs_profile_setup", phone, role };
-  } catch (err) {
-    console.error("loginWithPhone threw:", err);
-    return { ok: false, error: err instanceof Error ? err.message : "Unknown error" };
-  }
-}
-

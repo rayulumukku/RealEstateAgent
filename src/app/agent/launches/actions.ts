@@ -37,9 +37,9 @@ export async function getAgentEvents(phone: string): Promise<EventWithInvitation
 
   if (!events) return [];
 
-  // Get RSVPs for this agent
+  // Get invitations for this agent
   const { data: invitations } = await supabaseAdmin
-    .from("rsvps")
+    .from("event_invitations")
     .select("*")
     .eq("agent_id", profile.id);
 
@@ -57,7 +57,7 @@ export async function getAgentEvents(phone: string): Promise<EventWithInvitation
       description: event.description,
       event_type: event.event_type || "meet",
       qr_code_data: event.qr_code_data || null,
-      invitation_status: inv ? "accepted" : null,
+      invitation_status: inv?.status || null,
       invitation_id: inv?.id || null,
     };
   });
@@ -81,30 +81,18 @@ export async function respondToInvitation(
 
     if (!profile) return { ok: false, error: "Profile not found" };
 
-    let error = null;
-
-    if (response === "accepted") {
-      // Upsert into rsvps (ignore if already exists)
-      const res = await supabaseAdmin
-        .from("rsvps")
-        .upsert(
-          {
-            event_id: eventId,
-            agent_id: profile.id,
-            qr_code: `EVENT-${eventId.slice(0,8)}-${profile.id.slice(0,8)}`, // Generate dummy QR
-          },
-          { onConflict: "event_id,agent_id" }
-        );
-      error = res.error;
-    } else {
-      // If declined, delete the RSVP
-      const res = await supabaseAdmin
-        .from("rsvps")
-        .delete()
-        .eq("event_id", eventId)
-        .eq("agent_id", profile.id);
-      error = res.error;
-    }
+    // Upsert invitation
+    const { error } = await supabaseAdmin
+      .from("event_invitations")
+      .upsert(
+        {
+          event_id: eventId,
+          agent_id: profile.id,
+          status: response,
+          responded_at: new Date().toISOString(),
+        },
+        { onConflict: "event_id,agent_id" }
+      );
 
     if (error) return { ok: false, error: error.message };
     return { ok: true };

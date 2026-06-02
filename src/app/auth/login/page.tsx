@@ -8,8 +8,7 @@ import {
   CheckCircle2, Loader2, KeyRound, Sparkles,
   MessageSquare, Upload, Clock, UserCheck,
 } from "lucide-react";
-import { requestOtp, verifyOtp, submitKyc, createProfile, loginWithPhone } from "@/app/auth/actions";
-import { HYDERABAD_LOCATIONS } from "@/lib/hyderabadLocations";
+import { requestOtp, verifyOtp, submitKyc, createProfile } from "@/app/auth/actions";
 
 function LoginContent() {
   const router = useRouter();
@@ -59,24 +58,6 @@ function LoginContent() {
   // ---------------------------------------------------------------------------
   useEffect(() => {
     let cancelled = false;
-
-    // Quick client-side check first (instant, no network)
-    try {
-      const sessionActive = localStorage.getItem("agentsapp_session_active");
-      const storedRole = localStorage.getItem("agentsapp_logged_in_role");
-      if (sessionActive === "1" && storedRole) {
-        const dashboard =
-          storedRole === "super_admin" ? "/super-admin/dashboard" :
-          storedRole === "super_builder" ? "/super-builder/dashboard" :
-          storedRole === "builder" ? "/builder/dashboard" :
-          storedRole === "admin" || storedRole === "verification" || storedRole === "operations" ? "/admin/dashboard" :
-          "/agent/dashboard";
-        window.location.assign(dashboard);
-        return;
-      }
-    } catch { /* private mode */ }
-
-    // Server-side verification (cookie-based, authoritative)
     async function checkSession() {
       try {
         const res = await fetch("/api/me");
@@ -84,11 +65,13 @@ function LoginContent() {
         const data = await res.json();
         if (data.user && !cancelled) {
           const dashboard =
-            data.user.role === "super_admin" ? "/super-admin/dashboard" :
-            data.user.role === "super_builder" ? "/super-builder/dashboard" :
-            data.user.role === "builder" ? "/builder/dashboard" :
-            data.user.role === "admin" || data.user.role === "verification" || data.user.role === "operations" ? "/admin/dashboard" :
-            "/agent/dashboard";
+            data.user.role === "builder"
+              ? "/builder/dashboard"
+              : data.user.role === "admin" ||
+                data.user.role === "verification" ||
+                data.user.role === "operations"
+              ? "/admin/dashboard"
+              : "/agent/dashboard";
           window.location.assign(dashboard);
         }
       } catch {
@@ -100,52 +83,38 @@ function LoginContent() {
   }, []);
 
   // ---------------------------------------------------------------------------
-  // STEP 1 — phone entry → direct login (OTP PAUSED)
+  // STEP 1 → STEP 2  (request OTP)
   // ---------------------------------------------------------------------------
   const handleSendOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage("");
     setSuccess("");
 
-    const isSuperAdmin = phone === "7777" || phone.endsWith("7777");
-    if (!phone || (phone.length < 10 && !isSuperAdmin)) {
+    if (!phone || phone.length < 10) {
       setMessage("Please enter a valid 10-digit phone number.");
       return;
     }
 
     setLoading(true);
     try {
-      // OTP is paused — log in directly with phone number
-      const result = await loginWithPhone({ phone, role });
+      const result = await requestOtp({ phone, role });
       if (!result.ok) {
-        setMessage(result.error || "Login failed.");
+        setMessage(result.error || "Failed to send OTP.");
         return;
       }
-
-      if (result.status === "logged_in") {
-        try {
-          localStorage.setItem("agentsapp_logged_in_phone", result.user.phone);
-          localStorage.setItem("agentsapp_logged_in_user", result.user.name);
-          localStorage.setItem("agentsapp_logged_in_role", result.user.role);
-          localStorage.setItem("agentsapp_session_active", "1");
-        } catch { /* private mode */ }
-        window.location.assign(result.redirect);
-        return;
+      setStep(2);
+      // In dev, the action returns the OTP so a tester without WhatsApp can proceed.
+      if (result.devOtp) {
+        setSuccess(`OTP sent to ${phone}. (Dev mode — code: ${result.devOtp})`);
+      } else {
+        setSuccess(`OTP sent to ${phone} via WhatsApp.`);
       }
-
-      if (result.status === "needs_kyc") {
-        setStep(3);
-        return;
-      }
-
-      if (result.status === "needs_profile_setup") {
-        setStep(6);
-        return;
-      }
-
-      setMessage(`Unexpected response: ${JSON.stringify(result).slice(0, 200)}`);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "Network error. Please try again.");
+      setMessage(
+        err instanceof Error
+          ? err.message
+          : "Network error while sending OTP. Please try again."
+      );
     } finally {
       setLoading(false);
     }
@@ -249,8 +218,8 @@ function LoginContent() {
     e.preventDefault();
     setMessage("");
 
-    if (!fullName || !agencyName || !email || !reraNumber || !agentLocation || !reraUploaded || !idUploaded) {
-      setMessage("Please fill in all details including location and upload both documents.");
+    if (!fullName || !agencyName || !email || !reraNumber || !reraUploaded || !idUploaded) {
+      setMessage("Please fill in all details and upload both documents.");
       return;
     }
 
@@ -262,7 +231,6 @@ function LoginContent() {
         agencyName,
         email,
         reraNumber,
-        location: agentLocation,
         refCode,
       });
 
@@ -422,10 +390,10 @@ function LoginContent() {
               {loading ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Signing In…</span>
+                  <span>Sending OTP…</span>
                 </>
               ) : (
-                <span>Continue →</span>
+                <span>Send OTP via WhatsApp</span>
               )}
             </button>
           </form>
@@ -629,22 +597,6 @@ function LoginContent() {
                   className="w-full bg-slate-50 border border-slate-200 focus:border-[#25d366] rounded-xl py-2.5 px-3.5 text-slate-800 outline-none text-xs font-semibold transition"
                 />
               </div>
-            </div>
-
-            {/* Location Dropdown */}
-            <div className="space-y-1">
-              <label className="block uppercase text-[9px] font-bold tracking-wider">Your Location (Hyderabad Area) *</label>
-              <select
-                required
-                value={agentLocation}
-                onChange={(e) => setAgentLocation(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 focus:border-[#25d366] rounded-xl py-2.5 px-3.5 text-slate-800 outline-none text-xs font-semibold transition"
-              >
-                <option value="">Select your area...</option>
-                {HYDERABAD_LOCATIONS.map((loc) => (
-                  <option key={loc} value={loc}>{loc}</option>
-                ))}
-              </select>
             </div>
 
             <div className="grid grid-cols-2 gap-3 pt-1">

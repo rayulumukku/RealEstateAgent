@@ -3,8 +3,8 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { 
-  Building2, PlusCircle, Megaphone, Calendar,
-  LogOut, RefreshCw, BarChart3, Users, User, Crown
+  Building2, PlusCircle, Megaphone, 
+  LogOut, RefreshCw, BarChart3, Users, User
 } from "lucide-react";
 import { performLogout } from "@/components/SessionSync";
 

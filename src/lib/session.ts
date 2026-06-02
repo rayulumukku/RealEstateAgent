@@ -17,7 +17,7 @@
 export interface SessionPayload {
   sub: string;        // profile.id
   phone: string;      // profile.phone, e.g. "+91 98765 43210"
-  role: "agent" | "builder" | "super_builder" | "admin" | "super_admin" | "verification" | "operations";
+  role: "agent" | "builder" | "admin" | "verification" | "operations";
   name: string;
   iat: number;        // issued-at, seconds since epoch
   exp: number;        // expiry, seconds since epoch

@@ -4,7 +4,6 @@ import { useEffect, useState, useRef } from "react";
 import AgentSidebar from "@/components/AgentSidebar";
 import AgentBottomNav from "@/components/AgentBottomNav";
 import SessionSync from "@/components/SessionSync";
-import WarningPopup from "@/components/WarningPopup";
 import { Clock, XCircle, Loader2, Upload, CheckCircle2, FileText } from "lucide-react";
 import { performLogout } from "@/components/SessionSync";
 
@@ -349,7 +348,6 @@ export default function AgentLayout({
   return (
     <div className="flex h-screen bg-[#f8fafc] overflow-hidden text-slate-800">
       <SessionSync />
-      <WarningPopup />
       <div className="hidden lg:block shrink-0">
         <AgentSidebar />
       </div>

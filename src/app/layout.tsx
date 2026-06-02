@@ -14,15 +14,15 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: {
-    default: "RealConnect — Real Estate Platform",
-    template: "%s · RealConnect",
+    default: "AgentsApp — The WhatsApp OS for Agents",
+    template: "%s · AgentsApp",
   },
   description:
-    "All-in-one real estate platform for agents, builders, and developers. Manage leads, projects, events, campaigns, and channel partners seamlessly.",
-  applicationName: "RealConnect",
-  authors: [{ name: "RealConnect" }],
+    "WhatsApp-first operating system for real estate agents and builders. Manage leads, search inventory, run campaigns, and onboard channel partners — all from WhatsApp.",
+  applicationName: "AgentsApp",
+  authors: [{ name: "AgentsApp" }],
   icons: {
-    icon: "/icon.svg",
+    icon: "/favicon.ico",
   },
 };
 
