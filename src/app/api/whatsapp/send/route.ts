@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
         channelId: channelId,
         channelType: "whatsapp",
         recipient: {
-          name: "Broker",
+          name: "Agent",
           phone: finalPhone
         },
         whatsapp: {

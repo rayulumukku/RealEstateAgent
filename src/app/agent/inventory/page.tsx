@@ -259,7 +259,7 @@ export default function InventorySearch() {
                 </button>
 
                 <Link 
-                  href={`/agent/inventory/skyline-heights`}
+                  href={`/agent/inventory/${project.id}`}
                   className="px-4 py-2 bg-[#25d366] hover:bg-[#16c47f] text-white font-bold rounded-xl flex items-center space-x-1 text-xs shadow-sm transition"
                 >
                   <span>View Details</span>

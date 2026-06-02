@@ -56,7 +56,7 @@ export default function AgentRewards() {
     { name: "Launch Expert", desc: "RSVPed to 5+ LaunchCP Meets", icon: "🚀", unlocked: true },
     { name: "Webinar Pro", desc: "Attended 3 virtual webinars", icon: "🎓", unlocked: true },
     { name: "Active Partner", desc: "Logged 10+ leads in pipeline", icon: "🤝", unlocked: true },
-    { name: "Premium Broker", desc: "Reach 1,500 engagement points", icon: "⭐", unlocked: false },
+    { name: "Premium Agent", desc: "Reach 1,500 engagement points", icon: "⭐", unlocked: false },
     { name: "Super Recruiter", desc: "Refer 3+ approved agents", icon: "👑", unlocked: false }
   ]);
 
@@ -85,7 +85,7 @@ export default function AgentRewards() {
 
           // Update badges unlock state based on points
           setBadges(prev => prev.map(badge => {
-            if (badge.name === "Premium Broker" && profile.points >= 1500) {
+            if (badge.name === "Premium Agent" && profile.points >= 1500) {
               return { ...badge, unlocked: true };
             }
             if (badge.name === "Super Recruiter" && profile.referrals_count >= 3) {
@@ -172,7 +172,7 @@ export default function AgentRewards() {
   };
 
   const whatsappShareText = encodeURIComponent(
-    `Hey! Join agentsapp—the WhatsApp-native real estate OS for brokers. Register using my link to unlock premium projects and earn rewards points: ${referralLink}`
+    `Hey! Join agentsapp—the WhatsApp-native real estate OS for agents. Register using my link to unlock premium projects and earn rewards points: ${referralLink}`
   );
 
   if (loading) {
@@ -311,11 +311,11 @@ export default function AgentRewards() {
                   <div className="space-y-1.5 text-center md:text-left">
                     <div className="inline-flex items-center space-x-1 px-2.5 py-0.5 rounded-full bg-[#25d366]/10 text-xs font-bold text-[#16c47f]">
                       <Sparkles className="w-3 h-3 text-[#25d366]" />
-                      <span>Grow the Broker Network</span>
+                      <span>Grow the Agent Network</span>
                     </div>
-                    <h3 className="font-extrabold text-slate-900 text-base">Invite brokers and earn +500 points!</h3>
+                    <h3 className="font-extrabold text-slate-900 text-base">Invite agents and earn +500 points!</h3>
                     <p className="text-[11px] text-slate-550 max-w-md font-semibold leading-relaxed text-slate-500">
-                      When a new broker signs up using your link, completes KYC documents, and gets approved by Ops, you instantly get 500 engagement points.
+                      When a new agent signs up using your link, completes KYC documents, and gets approved by Ops, you instantly get 500 engagement points.
                     </p>
                   </div>
                   
@@ -399,14 +399,14 @@ export default function AgentRewards() {
                 {/* Referrals List Table */}
                 <div className="space-y-3 pt-3 border-t border-slate-100">
                   <h4 className="text-[10px] uppercase font-extrabold text-slate-400 tracking-wider">
-                    Your Referred Brokers
+                    Your Referred Agents
                   </h4>
 
                   <div className="overflow-x-auto">
                     <table className="w-full text-left text-xs">
                       <thead>
                         <tr className="border-b border-slate-100 text-[10px] text-slate-400 font-extrabold uppercase tracking-wider">
-                          <th className="py-2.5 font-bold">Broker Name</th>
+                          <th className="py-2.5 font-bold">Agent Name</th>
                           <th className="py-2.5 font-bold">Registration Date</th>
                           <th className="py-2.5 font-bold">Onboarding Status</th>
                           <th className="py-2.5 font-bold text-right">Points Earned</th>
@@ -451,7 +451,7 @@ export default function AgentRewards() {
         <div className="lg:col-span-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-6">
           <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center space-x-1.5">
             <Trophy className="w-4 h-4 text-amber-500" />
-            <span>Broker Leaderboard</span>
+            <span>Agent Leaderboard</span>
           </h3>
 
           <div className="space-y-4">

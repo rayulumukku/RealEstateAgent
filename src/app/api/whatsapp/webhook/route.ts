@@ -1,5 +1,79 @@
 import { NextRequest, NextResponse } from "next/server";
+import crypto from "crypto";
 import { supabaseAdmin as supabase } from "@/lib/supabaseAdmin";
+
+// -----------------------------------------------------------------------------
+// Helpers
+// -----------------------------------------------------------------------------
+
+/**
+ * Verify a Meta WhatsApp webhook payload using the X-Hub-Signature-256 header.
+ *
+ * Meta signs the *raw request body* with HMAC-SHA256 using the App Secret
+ * configured in the Meta App dashboard. The header is of the form
+ * "sha256=<hex>". We compare with timing-safe equality.
+ *
+ * If WHATSAPP_APP_SECRET is not set we treat verification as disabled and
+ * return true — this keeps local dev and the GallaBox/simulator paths
+ * working without extra config. In production, set the secret.
+ */
+function verifyMetaSignature(rawBody: string, signatureHeader: string | null): boolean {
+  const secret = process.env.WHATSAPP_APP_SECRET;
+  if (!secret) return true; // verification disabled — see note above
+  if (!signatureHeader || !signatureHeader.startsWith("sha256=")) return false;
+
+  const expected = crypto.createHmac("sha256", secret).update(rawBody, "utf8").digest("hex");
+  const provided = signatureHeader.slice("sha256=".length);
+
+  // Lengths must match before timingSafeEqual, otherwise it throws.
+  if (expected.length !== provided.length) return false;
+  try {
+    return crypto.timingSafeEqual(Buffer.from(expected, "hex"), Buffer.from(provided, "hex"));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Insert a row into whatsapp_messages. All failures are swallowed so that
+ * audit-logging never breaks the bot itself.
+ */
+async function logWhatsappMessage(row: {
+  direction: "inbound" | "outbound";
+  phone?: string | null;
+  agent_id?: string | null;
+  wamid?: string | null;
+  message_type?: string;
+  content?: string | null;
+  parsed_intent?: string | null;
+  parsed_entities?: Record<string, unknown> | null;
+  source?: string | null;
+  outbound_status?: number | null;
+  error_message?: string | null;
+  raw_payload?: unknown;
+}) {
+  try {
+    await supabase.from("whatsapp_messages").insert([{
+      direction: row.direction,
+      phone: row.phone ?? null,
+      agent_id: row.agent_id ?? null,
+      wamid: row.wamid ?? null,
+      message_type: row.message_type ?? "text",
+      content: row.content ?? null,
+      parsed_intent: row.parsed_intent ?? null,
+      parsed_entities: row.parsed_entities ?? null,
+      source: row.source ?? null,
+      outbound_status: row.outbound_status ?? null,
+      error_message: row.error_message ?? null,
+      // Cap the raw payload so we don't bloat the table.
+      raw_payload: row.raw_payload
+        ? JSON.parse(JSON.stringify(row.raw_payload).slice(0, 4000))
+        : null,
+    }]);
+  } catch (err) {
+    console.error("whatsapp_messages insert failed:", err);
+  }
+}
 
 // GET handler: Meta Webhook Subscription Handshake Verification
 export async function GET(req: NextRequest) {
@@ -21,30 +95,37 @@ export async function GET(req: NextRequest) {
   return new NextResponse("Bad Request", { status: 400 });
 }
 
-// POST handler: Receives incoming chat prompts from brokers (Meta, GallaBox, or Simulator)
+// POST handler: Receives incoming chat prompts from agents (Meta, GallaBox, or Simulator)
 export async function POST(req: NextRequest) {
   let fromPhoneRaw = "";
-  try {
-    const payload = await req.json();
-    console.log("WhatsApp Webhook Payload Received:", JSON.stringify(payload));
+  // Read the raw body once, so we can both verify the signature and parse it.
+  const rawBody = await req.text();
+  const signatureHeader = req.headers.get("x-hub-signature-256");
 
-    // DIAGNOSTICS: Log raw payload to Supabase (upsert ensures row is created if missing)
+  // Reject Meta-style payloads with bad signatures. GallaBox and the local
+  // simulator do not send this header — when WHATSAPP_APP_SECRET is unset
+  // we accept everything (see verifyMetaSignature).
+  if (signatureHeader && !verifyMetaSignature(rawBody, signatureHeader)) {
+    console.warn("Rejected WhatsApp webhook: invalid x-hub-signature-256");
+    await logWhatsappMessage({
+      direction: "inbound",
+      message_type: "system",
+      content: rawBody.slice(0, 1000),
+      error_message: "invalid x-hub-signature-256",
+      source: "meta",
+    });
+    return NextResponse.json({ status: "forbidden", message: "Invalid signature" }, { status: 403 });
+  }
+
+  try {
+    let payload: any;
     try {
-      const nowIST = new Date().toLocaleString("en-IN", { timeZone: "Asia/Kolkata" });
-      await supabase
-        .from("profiles")
-        .upsert({
-          phone: "+91 99999 99999",
-          name: "Webhook Debug Log",
-          role: "admin",
-          status: "approved",
-          points: 0,
-          referrals_count: 0,
-          rejection_reason: `[${nowIST} IST] Received from: ${payload.data?.contact?.phoneNumber || payload.from || "unknown"} | Msg: ${JSON.stringify(payload).slice(0, 800)}`
-        }, { onConflict: "phone" });
-    } catch (dbErr) {
-      console.error("Diagnostics save failed:", dbErr);
+      payload = rawBody ? JSON.parse(rawBody) : {};
+    } catch (parseErr) {
+      console.error("WhatsApp webhook: invalid JSON body", parseErr);
+      return NextResponse.json({ status: "error", message: "Invalid JSON" }, { status: 400 });
     }
+    console.log("WhatsApp Webhook Payload Received:", JSON.stringify(payload));
 
 
     // Support Meta, GallaBox, and Simulator payload formats
@@ -82,8 +163,42 @@ export async function POST(req: NextRequest) {
 
     if (!textBody || !fromPhoneRaw) {
       console.log("Ignored payload: Missing message body or sender phone number.");
+      await logWhatsappMessage({
+        direction: "inbound",
+        phone: fromPhoneRaw || null,
+        message_type: "system",
+        content: textBody || null,
+        error_message: "missing body or phone",
+        raw_payload: payload,
+      });
       return NextResponse.json({ status: "ignored", message: "Missing body or phone" });
     }
+
+    // Detect which BSP/source this payload is from. Used for audit logging.
+    const isFromMeta = !!payload?.entry?.[0]?.changes?.[0];
+    const isFromSimulatorEarly =
+      payload?.entry?.[0]?.id === "sandbox-entry" ||
+      payload?.from === "simulator" ||
+      payload?.fromPhone === "simulator";
+    const source: "meta" | "gallabox" | "simulator" =
+      isFromSimulatorEarly ? "simulator" : isFromMeta ? "meta" : "gallabox";
+
+    // Best-effort wamid extraction (Meta only).
+    const wamid =
+      payload?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.id ||
+      null;
+
+    // Audit-log the inbound message immediately. We don't know the
+    // agent_id yet; the lookup happens further down.
+    await logWhatsappMessage({
+      direction: "inbound",
+      phone: fromPhoneRaw,
+      wamid,
+      message_type: "text",
+      content: textBody,
+      source,
+      raw_payload: payload,
+    });
 
     const lowerText = textBody.toLowerCase();
 
@@ -117,57 +232,69 @@ export async function POST(req: NextRequest) {
       const apiSecret = process.env.GALLABOX_API_SECRET;
       const channelId = process.env.GALLABOX_CHANNEL_ID;
 
-      if (apiKey && apiSecret && channelId && !isFromSimulator) {
-        const cleanPhone = fromPhoneRaw.replace(/\D/g, "");
-        const finalPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-        console.log(`Sending live GallaBox reply to ${finalPhone}: ${replyText}`);
-        try {
-          const res = await fetch("https://server.gallabox.com/devapi/messages/whatsapp", {
-            method: "POST",
-            headers: {
-              "apiKey": apiKey,
-              "apiSecret": apiSecret,
-              "Content-Type": "application/json"
-            },
-            body: JSON.stringify({
-              channelId: channelId,
-              channelType: "whatsapp",
-              recipient: {
-                name: "Broker",
-                phone: finalPhone
-              },
-              whatsapp: {
-                type: "text",
-                text: {
-                  body: replyText
-                }
-              }
-            })
-          });
+      // For the simulator (and any time GallaBox isn't configured) we still
+      // want an audit trail of what the bot would have sent.
+      if (!apiKey || !apiSecret || !channelId || isFromSimulator) {
+        await logWhatsappMessage({
+          direction: "outbound",
+          phone: fromPhoneRaw,
+          message_type: "text",
+          content: replyText,
+          source,
+          // 0 indicates "not actually sent over the wire".
+          outbound_status: 0,
+          error_message: isFromSimulator ? "simulator (not sent)" : "GallaBox not configured",
+        });
+        return;
+      }
 
-          const resData = await res.json();
-          console.log(`GallaBox reply status: ${res.status}`, JSON.stringify(resData));
+      const cleanPhone = fromPhoneRaw.replace(/\D/g, "");
+      const finalPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+      console.log(`Sending live GallaBox reply to ${finalPhone}: ${replyText}`);
+      try {
+        const res = await fetch("https://server.gallabox.com/devapi/messages/whatsapp", {
+          method: "POST",
+          headers: {
+            "apiKey": apiKey,
+            "apiSecret": apiSecret,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            channelId: channelId,
+            channelType: "whatsapp",
+            recipient: { name: "Agent", phone: finalPhone },
+            whatsapp: { type: "text", text: { body: replyText } },
+          }),
+        });
 
-          // Update diagnostics with GallaBox response
-          await supabase
-            .from("profiles")
-            .update({
-              rejection_reason: `Webhook received | GallaBox Send Status: ${res.status} | Resp: ${JSON.stringify(resData).slice(0, 400)}`
-            })
-            .eq("phone", "+91 99999 99999");
-        } catch (e: any) {
-          console.error("GallaBox outbound fetch failed:", e);
-          await supabase
-            .from("profiles")
-            .update({
-              rejection_reason: `Webhook received | GallaBox Send Error: ${e.message}`
-            })
-            .eq("phone", "+91 99999 99999");
-        }
+        const resData = await res.json().catch(() => ({}));
+        console.log(`GallaBox reply status: ${res.status}`, JSON.stringify(resData));
+
+        await logWhatsappMessage({
+          direction: "outbound",
+          phone: fromPhoneRaw,
+          message_type: "text",
+          content: replyText,
+          source,
+          outbound_status: res.status,
+          error_message: res.ok ? null : JSON.stringify(resData).slice(0, 500),
+          raw_payload: resData,
+        });
+      } catch (e: any) {
+        console.error("GallaBox outbound fetch failed:", e);
+        await logWhatsappMessage({
+          direction: "outbound",
+          phone: fromPhoneRaw,
+          message_type: "text",
+          content: replyText,
+          source,
+          outbound_status: null,
+          error_message: e?.message || String(e),
+        });
       }
     };
 
-    // Query profiles in database to identify the broker
+    // Query profiles in database to identify the agent
     const { data: profile } = await supabase
       .from("profiles")
       .select("*")
@@ -207,7 +334,7 @@ export async function POST(req: NextRequest) {
             .single();
 
           if (error) {
-            console.error("Failed to register broker via WhatsApp:", error);
+            console.error("Failed to register agent via WhatsApp:", error);
             const replyErr = `🤖 Bot: ❌ Failed to register: ${error.message}`;
             await sendOutboundReply(replyErr);
             return NextResponse.json({ status: "error", reply: replyErr });
@@ -229,28 +356,68 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "success", reply: replyRegPrompt });
     }
 
-    if (commandLower === "help" || commandLower === "commands" || commandLower === "hi" || commandLower === "hello") {
-      const helpMsg = `🤖 *AgentsApp WhatsApp Bot Menu*\n\n` +
-        `Manage your real estate CRM with simple commands:\n\n` +
-        `1. 🆕 *Add Lead*:\n` +
-        `   _"aa Add Ravi looking for 3BHK"_ or _"aa Add lead Amit phone 9912345678"_\n\n` +
-        `2. ⏰ *Set Reminder*:\n` +
-        `   _"aa Remind me tomorrow to call Ramesh"_\n\n` +
-        `3. ⚡ *Update Lead Status*:\n` +
-        `   _"aa Amit site visit"_ or _"aa Ramesh Kumar closed"_\n\n` +
-        `4. 🏢 *Search Inventory*:\n` +
-        `   _"aa Show east-facing plots"_ or _"aa Search 3BHK Kokapet"_\n\n` +
-        `5. 📁 *Request Brochure*:\n` +
-        `   _"aa Send Skyline brochure"_ or _"aa Green Meadows layout"_\n\n` +
-        `6. 📋 *View Leads List*:\n` +
-        `   _"aa My leads"_ or _"aa Show all leads"_\n\n` +
-        `7. 🔍 *Search Lead Card*:\n` +
-        `   _"aa Search Ramesh"_ or _"aa Find Amit"_\n\n` +
-        `8. 🚀 *Upcoming Launches*:\n` +
-        `   _"aa Upcoming launches"_ or _"aa launches"_\n\n` +
-        `9. 🎥 *Register Webinar*:\n` +
-        `   _"aa Register webinar"_ or _"aa webinars"_\n\n` +
-        `👉 Remember to prefix your commands with *aa* when chatting on WhatsApp!`;
+    if (commandLower === "help" || commandLower === "commands" || commandLower === "hi" || commandLower === "hello" || commandLower === "menu") {
+      // Role-based menu: show different options depending on agent/builder/admin
+      let helpMsg = "";
+
+      if (profile.role === "builder") {
+        helpMsg = `🤖 *AgentsApp Builder Menu*\n\n` +
+          `👋 Welcome *${profile.name}* (${profile.agency_name || "Builder"})!\n\n` +
+          `Manage your projects and campaigns:\n\n` +
+          `1. 🚀 *Upcoming Launches*:\n` +
+          `   _"aa launches"_ — view all scheduled launches\n\n` +
+          `2. 🎥 *Register Webinar*:\n` +
+          `   _"aa webinars"_ — view/register agent webinars\n\n` +
+          `3. 👥 *My Agents*:\n` +
+          `   _"aa my agents"_ — list registered channel partners\n\n` +
+          `4. 🏢 *Search Inventory*:\n` +
+          `   _"aa inventory"_ — view your project units\n\n` +
+          `5. 📁 *Brochures*:\n` +
+          `   _"aa brochure [project]"_ — send brochure to agents\n\n` +
+          `6. 📊 *Campaign Stats*:\n` +
+          `   _"aa stats"_ — view campaign analytics\n\n` +
+          `👉 Prefix all commands with *aa*`;
+      } else if (profile.role === "admin" || profile.role === "verification" || profile.role === "operations") {
+        helpMsg = `🤖 *AgentsApp Admin Menu*\n\n` +
+          `👋 Welcome *${profile.name}* (Admin)!\n\n` +
+          `Full platform access:\n\n` +
+          `📊 *Analytics & Reports*\n` +
+          `1. _"aa agents"_ — list all registered agents\n` +
+          `2. _"aa leads"_ — total lead count across platform\n` +
+          `3. _"aa stats"_ — platform-wide analytics\n\n` +
+          `👥 *Agent Management*\n` +
+          `4. _"aa pending"_ — view pending verifications\n` +
+          `5. _"aa approve [name]"_ — approve an agent\n` +
+          `6. _"aa reject [name]"_ — reject an agent\n\n` +
+          `🏢 *Inventory & Projects*\n` +
+          `7. _"aa inventory"_ — search all inventory\n` +
+          `8. _"aa projects"_ — list all projects\n\n` +
+          `📅 *Events*\n` +
+          `9. _"aa launches"_ — upcoming events\n` +
+          `10. _"aa webinars"_ — active webinars\n\n` +
+          `👉 Prefix all commands with *aa*`;
+      } else {
+        // Default: Agent/Agent menu
+        helpMsg = `🤖 *AgentsApp Agent Menu*\n\n` +
+          `👋 Welcome *${profile.name}* (${profile.agency_name || "Agent"})!\n` +
+          `🆔 CP ID: *${profile.cp_id || "Pending"}*\n\n` +
+          `Manage your CRM:\n\n` +
+          `📋 *Leads*\n` +
+          `1. _"aa Add [Name] looking for [BHK]"_ — add lead\n` +
+          `2. _"aa My leads"_ — view all your leads\n` +
+          `3. _"aa Search [Name]"_ — find a specific lead\n` +
+          `4. _"aa [Name] site visit"_ — update lead status\n\n` +
+          `⏰ *Reminders*\n` +
+          `5. _"aa Remind me to call [Name] time [date]"_ — set reminder\n\n` +
+          `🏢 *Inventory*\n` +
+          `6. _"aa Search 3BHK Kokapet"_ — search units\n` +
+          `7. _"aa brochure [project]"_ — get brochure PDF\n\n` +
+          `📅 *Events*\n` +
+          `8. _"aa launches"_ — upcoming events & meets\n` +
+          `9. _"aa webinars"_ — register for webinars\n\n` +
+          `👉 Prefix all commands with *aa*`;
+      }
+
       await sendOutboundReply(helpMsg);
       return NextResponse.json({ status: "success", reply: helpMsg });
     }
@@ -544,7 +711,7 @@ export async function POST(req: NextRequest) {
         .order("created_at", { ascending: false });
 
       if (!webinars || webinars.length === 0) {
-        const replyEmpty = "🤖 Bot: No active broker webinars scheduled. Check back later!";
+        const replyEmpty = "🤖 Bot: No active agent webinars scheduled. Check back later!";
         await sendOutboundReply(replyEmpty);
         return NextResponse.json({ status: "success", reply: replyEmpty });
       }
@@ -556,7 +723,7 @@ export async function POST(req: NextRequest) {
         await sendOutboundReply(replyOk);
         return NextResponse.json({ status: "success", reply: replyOk });
       } else {
-        let replyMsg = `🎥 *Active Broker Webinars*:\n\n`;
+        let replyMsg = `🎥 *Active Agent Webinars*:\n\n`;
         webinars.forEach((w, idx) => {
           replyMsg += `${idx + 1}. 📺 *${w.title}*\n   📅 Time: *${w.scheduled_time}*\n   🎁 Reward: *${w.reward || "N/A"}*\n   📝 Info: ${w.details || "N/A"}\n\n`;
         });
@@ -698,8 +865,101 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "success", reply: replyMsg.trim() });
     }
 
+    // 11. ADMIN: LIST ALL AGENTS
+    if ((profile.role === "admin" || profile.role === "verification" || profile.role === "operations") &&
+        (commandLower === "agents" || commandLower === "all agents")) {
+      const { data: agents, count } = await supabase
+        .from("profiles")
+        .select("name, phone, status, agency_name", { count: "exact" })
+        .eq("role", "agent")
+        .order("created_at", { ascending: false })
+        .limit(15);
+
+      let replyMsg = `🤖 *All Registered Agents* (${count || 0} total)\n\n`;
+      (agents || []).forEach((a: any, idx: number) => {
+        const statusEmoji = a.status === "approved" ? "✅" : a.status === "pending" ? "⏳" : "❌";
+        replyMsg += `${idx + 1}. ${statusEmoji} *${a.name}*\n   📱 ${a.phone} | 🏢 ${a.agency_name || "N/A"}\n\n`;
+      });
+      await sendOutboundReply(replyMsg.trim());
+      return NextResponse.json({ status: "success", reply: replyMsg.trim() });
+    }
+
+    // 12. ADMIN: PENDING VERIFICATIONS
+    if ((profile.role === "admin" || profile.role === "verification") &&
+        commandLower === "pending") {
+      const { data: pending } = await supabase
+        .from("profiles")
+        .select("name, phone, agency_name, rera_number")
+        .eq("role", "agent")
+        .eq("status", "pending")
+        .order("created_at", { ascending: false });
+
+      if (!pending || pending.length === 0) {
+        const reply = "🤖 Bot: No pending verifications. All caught up! ✅";
+        await sendOutboundReply(reply);
+        return NextResponse.json({ status: "success", reply });
+      }
+
+      let replyMsg = `🤖 *Pending Verifications* (${pending.length})\n\n`;
+      pending.forEach((a: any, idx: number) => {
+        replyMsg += `${idx + 1}. ⏳ *${a.name}*\n   📱 ${a.phone}\n   🏢 ${a.agency_name || "N/A"}\n   📄 RERA: ${a.rera_number || "N/A"}\n\n`;
+      });
+      replyMsg += `👉 Type _"aa approve [name]"_ or _"aa reject [name]"_ to action.`;
+      await sendOutboundReply(replyMsg.trim());
+      return NextResponse.json({ status: "success", reply: replyMsg.trim() });
+    }
+
+    // 13. ADMIN: PLATFORM STATS
+    if ((profile.role === "admin" || profile.role === "builder") &&
+        (commandLower === "stats" || commandLower === "analytics")) {
+      const { count: agentCount } = await supabase
+        .from("profiles")
+        .select("*", { count: "exact", head: true })
+        .eq("role", "agent");
+
+      const { count: leadCount } = await supabase
+        .from("leads")
+        .select("*", { count: "exact", head: true });
+
+      const { count: eventCount } = await supabase
+        .from("events")
+        .select("*", { count: "exact", head: true });
+
+      const replyMsg = `🤖 *Platform Stats*\n\n` +
+        `👥 Total Agents: *${agentCount || 0}*\n` +
+        `📊 Total Leads: *${leadCount || 0}*\n` +
+        `📅 Total Events: *${eventCount || 0}*\n`;
+      await sendOutboundReply(replyMsg.trim());
+      return NextResponse.json({ status: "success", reply: replyMsg.trim() });
+    }
+
+    // 14. BUILDER: MY AGENTS
+    if (profile.role === "builder" &&
+        (commandLower === "my agents" || commandLower === "agents")) {
+      const { data: agents } = await supabase
+        .from("profiles")
+        .select("name, phone, agency_name, status")
+        .eq("role", "agent")
+        .eq("status", "approved")
+        .order("created_at", { ascending: false })
+        .limit(20);
+
+      if (!agents || agents.length === 0) {
+        const reply = "🤖 Bot: No registered agents found.";
+        await sendOutboundReply(reply);
+        return NextResponse.json({ status: "success", reply });
+      }
+
+      let replyMsg = `🤖 *Registered Channel Partners* (${agents.length})\n\n`;
+      agents.forEach((a: any, idx: number) => {
+        replyMsg += `${idx + 1}. ✅ *${a.name}*\n   📱 ${a.phone} | 🏢 ${a.agency_name || "N/A"}\n\n`;
+      });
+      await sendOutboundReply(replyMsg.trim());
+      return NextResponse.json({ status: "success", reply: replyMsg.trim() });
+    }
+
     // Default/Fallback help menu
-    const helpMsg = `🤖 Bot: I didn't catch that command. Type *help* to see all available commands.`;
+    const helpMsg = `🤖 Bot: I didn't catch that command. Type *aa help* to see all available commands.`;
     await sendOutboundReply(helpMsg);
     return NextResponse.json({ status: "success", reply: helpMsg });
   } catch (err: any) {
@@ -719,7 +979,7 @@ export async function POST(req: NextRequest) {
           body: JSON.stringify({
             channelId,
             channelType: "whatsapp",
-            recipient: { name: "Broker", phone: finalPhone },
+            recipient: { name: "Agent", phone: finalPhone },
             whatsapp: { type: "text", text: { body: replyErr } }
           })
         });

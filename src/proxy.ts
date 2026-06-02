@@ -1,0 +1,78 @@
+import { NextRequest, NextResponse } from "next/server";
+import { sessionCookieName, verifySession } from "@/lib/session";
+
+// -----------------------------------------------------------------------------
+// Route protection (Next.js 16 "proxy" — formerly "middleware").
+//
+// Anything under /agent, /builder or /admin requires a valid session cookie.
+// Unauthenticated requests are redirected to /auth/login with the original
+// URL preserved as ?next=… so we can bounce back after login.
+//
+// Roles are enforced loosely:
+//   - /admin/*      → admin | verification | operations
+//   - /builder/*    → builder
+//   - /agent/*      → agent
+// If a user with a different role lands on a protected section we redirect
+// to their own dashboard rather than showing a confusing 403.
+// -----------------------------------------------------------------------------
+
+const PROTECTED_PREFIXES = ["/agent", "/builder", "/super-builder", "/super-admin", "/admin"] as const;
+
+function dashboardForRole(role: string): string {
+  switch (role) {
+    case "super_admin":
+      return "/super-admin/dashboard";
+    case "super_builder":
+      return "/super-builder/dashboard";
+    case "builder":
+      return "/builder/dashboard";
+    case "admin":
+    case "verification":
+    case "operations":
+      return "/admin/dashboard";
+    default:
+      return "/agent/dashboard";
+  }
+}
+
+function isAllowed(role: string, pathname: string): boolean {
+  if (pathname.startsWith("/super-admin")) return role === "super_admin";
+  if (pathname.startsWith("/admin"))
+    return role === "admin" || role === "verification" || role === "operations" || role === "super_admin";
+  if (pathname.startsWith("/super-builder")) return role === "super_builder" || role === "super_admin";
+  if (pathname.startsWith("/builder")) return role === "builder" || role === "super_builder" || role === "super_admin";
+  if (pathname.startsWith("/agent")) return role === "agent" || role === "super_admin";
+  return true;
+}
+
+export async function proxy(req: NextRequest) {
+  const { pathname, search } = req.nextUrl;
+
+  const isProtected = PROTECTED_PREFIXES.some((p) => pathname.startsWith(p));
+  if (!isProtected) return NextResponse.next();
+
+  const token = req.cookies.get(sessionCookieName)?.value;
+  const session = await verifySession(token);
+
+  if (!session) {
+    const loginUrl = req.nextUrl.clone();
+    loginUrl.pathname = "/auth/login";
+    loginUrl.search = `?next=${encodeURIComponent(pathname + search)}`;
+    return NextResponse.redirect(loginUrl);
+  }
+
+  if (!isAllowed(session.role, pathname)) {
+    const url = req.nextUrl.clone();
+    url.pathname = dashboardForRole(session.role);
+    url.search = "";
+    return NextResponse.redirect(url);
+  }
+
+  return NextResponse.next();
+}
+
+export const config = {
+  // Match everything under the protected sections. Excludes /api, /_next,
+  // /auth, /favicon, and static assets so we don't run on every request.
+  matcher: ["/agent/:path*", "/builder/:path*", "/super-builder/:path*", "/super-admin/:path*", "/admin/:path*"],
+};

@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { 
   Plus, Search, Filter, Kanban as KanbanIcon, 
   List as ListIcon, X, MapPin, Phone, 
-  Trash2, ArrowRightLeft, Sparkles, MessageSquare, 
+  Trash2, ArrowRightLeft, MessageSquare, 
   PhoneCall, Calendar, Share2, Loader2 
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
@@ -18,7 +18,6 @@ interface Client {
   budget: string;
   date: string;
   propertyType: "Plot" | "Apartment" | "Villa" | "Commercial";
-  aiScore: number;
   lastInteraction: string;
   stage: "New" | "Interested" | "Site Visit" | "Negotiation" | "Closed" | "Lost";
 }
@@ -60,51 +59,55 @@ export default function ClientPipeline() {
 
   const stages: Client["stage"][] = ["New", "Interested", "Site Visit", "Negotiation", "Closed", "Lost"];
 
-  // Fetch client leads from Supabase
+  // Fetch client leads from server API (uses service role key — no permission issues)
   async function loadLeads() {
     setLoading(true);
     try {
-      const phone = localStorage.getItem("agentsapp_logged_in_phone") || "+91 98765 43210";
+      const res = await fetch("/api/leads");
+      if (!res.ok) {
+        console.error("Failed to fetch leads:", res.status);
+        setLoading(false);
+        return;
+      }
+
+      const data = await res.json();
       
-      // 1. Fetch current agent ID
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("id")
-        .eq("phone", phone)
-        .single();
+      if (data.error) {
+        console.error("Leads API error:", data.error);
+        setLoading(false);
+        return;
+      }
 
-      if (profile) {
-        setAgentId(profile.id);
-
-        // 2. Fetch leads for this agent
-        const { data: leads, error } = await supabase
-          .from("leads")
-          .select("*")
-          .eq("agent_id", profile.id)
-          .order("created_at", { ascending: false });
-
-        if (leads) {
-          const mappedClients: Client[] = leads.map((l: any) => {
-            const displayProp = l.details?.propertyType || "Apartment";
-            const interaction = l.details?.lastInteraction || "Lead created";
-            const score = l.details?.aiScore || Math.floor(65 + Math.random() * 30);
-
-            return {
-              id: l.id,
-              name: l.name,
-              phone: l.phone,
-              bhk: l.requirement || "3 BHK",
-              location: l.location || "Kokapet",
-              budget: l.budget || "₹1.50 Cr",
-              date: new Date(l.created_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }),
-              propertyType: displayProp,
-              aiScore: score,
-              lastInteraction: interaction,
-              stage: STAGE_MAP_DB_TO_UI[l.status] || "New"
-            };
-          });
-          setClients(mappedClients);
+      // Set agentId from session for adding new leads
+      try {
+        const meRes = await fetch("/api/me");
+        if (meRes.ok) {
+          const meData = await meRes.json();
+          if (meData.user?.id) {
+            setAgentId(meData.user.id);
+          }
         }
+      } catch { /* ignore */ }
+
+      if (data.leads) {
+        const mappedClients: Client[] = data.leads.map((l: any) => {
+          const displayProp = l.details?.propertyType || "Apartment";
+          const interaction = l.details?.lastInteraction || "Lead created";
+
+          return {
+            id: l.id,
+            name: l.name,
+            phone: l.phone,
+            bhk: l.requirement || "3 BHK",
+            location: l.location || "Kokapet",
+            budget: l.budget || "₹1.50 Cr",
+            date: new Date(l.created_at).toLocaleDateString('en-US', { day: 'numeric', month: 'short' }),
+            propertyType: displayProp,
+            lastInteraction: interaction,
+            stage: STAGE_MAP_DB_TO_UI[l.status] || "New"
+          };
+        });
+        setClients(mappedClients);
       }
     } catch (err) {
       console.error("Error loading leads:", err);
@@ -126,32 +129,33 @@ export default function ClientPipeline() {
 
   const handleAddClient = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newClientName || !newClientLoc || !newClientBudget || !agentId) return;
+    if (!newClientName || !newClientLoc || !newClientBudget) {
+      alert("Please fill in Client Name, Preferred Area, and Budget.");
+      return;
+    }
     setLoading(true);
 
     try {
-      const generatedScore = Math.floor(65 + Math.random() * 30);
-      
-      const { data, error } = await supabase
-        .from("leads")
-        .insert([{
-          agent_id: agentId,
+      const res = await fetch("/api/leads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
           name: newClientName,
           phone: newClientPhone || "98765 00000",
           requirement: newClientBhk,
           location: newClientLoc,
           budget: newClientBudget,
-          status: "new",
           details: {
             propertyType: newClientProp,
-            aiScore: generatedScore,
             lastInteraction: "Lead logged"
           }
-        }])
-        .select()
-        .single();
+        }),
+      });
 
-      if (error) throw error;
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Failed to add lead");
+      }
 
       setNewClientName("");
       setNewClientPhone("");
@@ -326,10 +330,6 @@ export default function ClientPipeline() {
                             {client.bhk}
                           </span>
 
-                          <span className="text-[9px] font-extrabold text-[#16c47f] flex items-center space-x-0.5 bg-emerald-50 px-1.5 py-0.5 rounded">
-                            <Sparkles className="w-3 h-3 text-[#25d366]" />
-                            <span>AI Score: {client.aiScore}</span>
-                          </span>
                         </div>
                       </div>
 

@@ -1,27 +1,60 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { 
   Megaphone, Smartphone, HelpCircle, FileText, 
-  Plus, Check, Sparkles, Send, AlertTriangle 
+  Plus, Check, Sparkles, Send, AlertTriangle, Calendar, MapPin, X, Users
 } from "lucide-react";
 import Link from "next/link";
+import { launchCampaignAction } from "./actions";
+import { HYDERABAD_LOCATIONS } from "@/lib/hyderabadLocations";
+import { supabase } from "@/lib/supabase";
 
 export default function CampaignBuilder() {
   const [campaignName, setCampaignName] = useState("Skyline Heights Launch");
-  const [filters, setFilters] = useState(["Hyderabad West", "Verified Agents"]);
+  const [filters, setFilters] = useState(["Verified Agents"]);
   const [message, setMessage] = useState(
     "Dear Partner,\n\nJoin us for the exclusive launch of Skyline Heights on 30th May at 11:00 AM at Kokapet, Hyderabad.\n\nExciting offers and high commission structures await you!\n\nLimited seats, RSVP now."
   );
+  const [eventDate, setEventDate] = useState("30th May 2026, 11:00 AM");
+  const [eventLocation, setEventLocation] = useState("Kokapet, Hyderabad");
   const [attachedFile, setAttachedFile] = useState("Skyline_Heights_Brochure.pdf");
   const [newFilter, setNewFilter] = useState("");
   const [sending, setSending] = useState(false);
   const [sentSuccess, setSentSuccess] = useState(false);
+  const [sentCount, setSentCount] = useState(0);
+
+  // Location-based filtering
+  const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
+  const [locationSearch, setLocationSearch] = useState("");
+  const [showLocationDropdown, setShowLocationDropdown] = useState(false);
+  const [estimatedReach, setEstimatedReach] = useState(0);
 
   // Audience filters options from schema spec
-  const [cityFilter, setCityFilter] = useState("Hyderabad");
   const [verifyFilter, setVerifyFilter] = useState(true);
-  const [webinarFilter, setWebinarFilter] = useState(false);
+
+  useEffect(() => {
+    fetchEstimatedReach();
+  }, [selectedLocations]);
+
+  async function fetchEstimatedReach() {
+    try {
+      let query = supabase
+        .from("profiles")
+        .select("id", { count: "exact", head: true })
+        .eq("role", "agent")
+        .eq("status", "approved");
+
+      if (selectedLocations.length > 0) {
+        query = query.in("location", selectedLocations);
+      }
+
+      const { count } = await query;
+      setEstimatedReach(count || 0);
+    } catch {
+      setEstimatedReach(0);
+    }
+  }
 
   const handleAddFilter = (e: React.FormEvent) => {
     e.preventDefault();
@@ -34,15 +67,46 @@ export default function CampaignBuilder() {
     setFilters(filters.filter((_, i) => i !== index));
   };
 
-  const handleLaunchCampaign = () => {
+  const toggleLocation = (loc: string) => {
+    setSelectedLocations((prev) =>
+      prev.includes(loc) ? prev.filter((l) => l !== loc) : [...prev, loc]
+    );
+  };
+
+  const filteredLocations = HYDERABAD_LOCATIONS.filter((loc) =>
+    loc.toLowerCase().includes(locationSearch.toLowerCase())
+  );
+
+  const handleLaunchCampaign = async () => {
     setSending(true);
-    setTimeout(() => {
-      setSending(false);
+    
+    const phone = localStorage.getItem("agentsapp_logged_in_phone") || "";
+    const audienceStr = selectedLocations.length > 0 
+      ? `Locations: ${selectedLocations.join(", ")} - ${filters.join(", ")}`
+      : `All Hyderabad - ${filters.join(", ")}`;
+
+    const res = await launchCampaignAction(
+      phone,
+      campaignName,
+      audienceStr,
+      "Rich Media",
+      eventDate,
+      eventLocation,
+      message,
+      selectedLocations.length > 0 ? selectedLocations : undefined
+    );
+
+    setSending(false);
+    
+    if (res.ok) {
       setSentSuccess(true);
+      setSentCount(res.sentCount || 0);
       setTimeout(() => {
         setSentSuccess(false);
       }, 5000);
-    }, 2000);
+    } else {
+      alert("Failed to launch campaign: " + res.error);
+    }
   };
 
   return (
@@ -51,7 +115,7 @@ export default function CampaignBuilder() {
       <div className="flex items-center justify-between border-b border-slate-200 pb-5">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Campaign Studio</h1>
-          <p className="text-[#64748b] text-xs font-semibold mt-0.5">Broadcast WhatsApp templates to filterable broker categories.</p>
+          <p className="text-[#64748b] text-xs font-semibold mt-0.5">Broadcast WhatsApp templates to agents filtered by location.</p>
         </div>
       </div>
 
@@ -69,7 +133,6 @@ export default function CampaignBuilder() {
               <div className="bg-indigo-500 h-full" style={{ width: "80%" }}></div>
             </div>
             
-            {/* Overage Warning */}
             <div className="p-2 bg-amber-50 rounded border border-amber-200 text-[10px] text-amber-700 flex items-center space-x-1.5 font-bold">
               <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
               <span>Overage Alert: Additional broadcasts will be charged at ₹0.50 per msg.</span>
@@ -89,22 +152,100 @@ export default function CampaignBuilder() {
               />
             </div>
 
-            {/* Audience segment filters */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs text-slate-600">
-              <div className="space-y-1.5">
-                <label className="uppercase tracking-wider text-[10px] text-slate-400">City Segment</label>
-                <select 
-                  value={cityFilter}
-                  onChange={(e) => setCityFilter(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 text-slate-800 rounded-xl py-2 px-3 outline-none focus:border-[#25d366]"
-                >
-                  <option>Hyderabad</option>
-                  <option>Bangalore</option>
-                  <option>Chennai</option>
-                </select>
+            {/* Location-Based Agent Filter */}
+            <div className="space-y-2">
+              <label className="block uppercase tracking-wider text-[10px]">
+                Filter Agents by Location (Hyderabad Areas)
+              </label>
+              <p className="text-[10px] text-slate-400 -mt-1">
+                Select specific areas — only agents from these locations will receive the invitation.
+                Leave empty to send to ALL agents.
+              </p>
+
+              {/* Selected Locations Tags */}
+              {selectedLocations.length > 0 && (
+                <div className="flex flex-wrap gap-2 mb-2">
+                  {selectedLocations.map((loc) => (
+                    <span key={loc} className="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-200 text-[11px] font-bold">
+                      <MapPin className="w-3 h-3" />
+                      <span>{loc}</span>
+                      <button 
+                        type="button" 
+                        onClick={() => toggleLocation(loc)}
+                        className="text-indigo-400 hover:text-indigo-600 ml-1"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                  <button 
+                    type="button"
+                    onClick={() => setSelectedLocations([])}
+                    className="text-[10px] text-red-500 hover:text-red-700 font-bold uppercase tracking-wider px-2 py-1"
+                  >
+                    Clear All
+                  </button>
+                </div>
+              )}
+
+              {/* Location Search & Dropdown */}
+              <div className="relative">
+                <input
+                  type="text"
+                  value={locationSearch}
+                  onChange={(e) => { setLocationSearch(e.target.value); setShowLocationDropdown(true); }}
+                  onFocus={() => setShowLocationDropdown(true)}
+                  placeholder="Search area... (e.g. Madhapur, Gachibowli, Kokapet)"
+                  className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 rounded-xl py-2.5 px-3 text-slate-800 outline-none text-xs font-medium transition"
+                />
+                {showLocationDropdown && (
+                  <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                    {filteredLocations.length === 0 ? (
+                      <div className="p-3 text-xs text-slate-400">No areas found</div>
+                    ) : (
+                      filteredLocations.map((loc) => (
+                        <button
+                          key={loc}
+                          type="button"
+                          onClick={() => { toggleLocation(loc); setLocationSearch(""); }}
+                          className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-slate-50 transition flex items-center justify-between ${
+                            selectedLocations.includes(loc) ? "bg-indigo-50 text-indigo-700" : "text-slate-700"
+                          }`}
+                        >
+                          <span className="flex items-center space-x-2">
+                            <MapPin className="w-3 h-3 text-slate-400" />
+                            <span>{loc}</span>
+                          </span>
+                          {selectedLocations.includes(loc) && (
+                            <Check className="w-3.5 h-3.5 text-indigo-600" />
+                          )}
+                        </button>
+                      ))
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => setShowLocationDropdown(false)}
+                      className="w-full text-center py-2 text-[10px] text-slate-400 font-bold uppercase tracking-wider border-t border-slate-100 hover:bg-slate-50"
+                    >
+                      Close
+                    </button>
+                  </div>
+                )}
               </div>
 
-              <div className="space-y-1.5 pt-6">
+              {/* Estimated Reach */}
+              <div className="flex items-center space-x-2 p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
+                <Users className="w-4 h-4 text-emerald-600" />
+                <span className="text-xs font-bold text-emerald-700">
+                  Estimated Reach: {estimatedReach} agent{estimatedReach !== 1 ? "s" : ""}
+                  {selectedLocations.length > 0 ? ` in ${selectedLocations.length} area${selectedLocations.length !== 1 ? "s" : ""}` : " (all areas)"}
+                </span>
+              </div>
+            </div>
+
+            {/* Additional Filters */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs text-slate-600">
+              <div className="space-y-1.5 pt-1">
                 <label className="flex items-center space-x-2 cursor-pointer font-bold">
                   <input 
                     type="checkbox" 
@@ -115,23 +256,11 @@ export default function CampaignBuilder() {
                   <span>Verified Agents Only</span>
                 </label>
               </div>
-
-              <div className="space-y-1.5 pt-6">
-                <label className="flex items-center space-x-2 cursor-pointer font-bold">
-                  <input 
-                    type="checkbox" 
-                    checked={webinarFilter} 
-                    onChange={(e) => setWebinarFilter(e.target.checked)}
-                    className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 w-4 h-4"
-                  />
-                  <span>Webinar Attendees Only</span>
-                </label>
-              </div>
             </div>
 
-            {/* Target Audience Filters */}
+            {/* Specific Filters */}
             <div className="space-y-1.5">
-              <label className="block uppercase tracking-wider text-[10px]">Specific Filters</label>
+              <label className="block uppercase tracking-wider text-[10px]">Additional Tags</label>
               <div className="flex flex-wrap gap-2 mb-2">
                 {filters.map((f, i) => (
                   <span key={i} className="inline-flex items-center space-x-1.5 px-2 py-1 rounded-lg bg-indigo-50 text-indigo-600 border border-indigo-200">
@@ -160,8 +289,42 @@ export default function CampaignBuilder() {
                   onClick={handleAddFilter}
                   className="px-3.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl transition text-xs font-bold"
                 >
-                  Add Filter
+                  Add
                 </button>
+              </div>
+            </div>
+
+            {/* Event Details */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-1.5">
+                <label className="block uppercase tracking-wider text-[10px]">Event Date & Time</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+                    <Calendar className="w-4 h-4 text-slate-400" />
+                  </div>
+                  <input 
+                    type="text" 
+                    value={eventDate}
+                    onChange={(e) => setEventDate(e.target.value)}
+                    placeholder="e.g. 30th May, 11:00 AM"
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-[#25d366] rounded-xl py-2.5 pl-9 pr-3 text-slate-800 outline-none text-sm font-medium transition"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="block uppercase tracking-wider text-[10px]">Event Location</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-3 flex items-center pointer-events-none">
+                    <MapPin className="w-4 h-4 text-slate-400" />
+                  </div>
+                  <input 
+                    type="text" 
+                    value={eventLocation}
+                    onChange={(e) => setEventLocation(e.target.value)}
+                    placeholder="e.g. Kokapet, Hyderabad"
+                    className="w-full bg-slate-50 border border-slate-200 focus:border-[#25d366] rounded-xl py-2.5 pl-9 pr-3 text-slate-800 outline-none text-sm font-medium transition"
+                  />
+                </div>
               </div>
             </div>
 
@@ -189,9 +352,8 @@ export default function CampaignBuilder() {
               <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 flex items-center justify-between">
                 <div className="flex items-center space-x-2 text-slate-700">
                   <FileText className="w-5 h-5 text-indigo-500 shrink-0" />
-                  <span className="text-xs font-bold">{attachedFile}</span>
+                  <span className="text-xs font-bold">{attachedFile || "No file attached"}</span>
                 </div>
-
                 <button 
                   type="button" 
                   onClick={() => setAttachedFile(attachedFile ? "" : "Skyline_Heights_Brochure.pdf")}
@@ -204,17 +366,17 @@ export default function CampaignBuilder() {
 
             {/* Success Notification Banner */}
             {sentSuccess && (
-              <div className="p-4 bg-brand-green/10 border border-[#25d366]/30 rounded-xl text-[#16c47f] text-xs flex items-center space-x-2 animate-bounce">
+              <div className="p-4 bg-brand-green/10 border border-[#25d366]/30 rounded-xl text-[#16c47f] text-xs flex items-center space-x-2">
                 <Check className="w-4 h-4" />
-                <span>Campaign "{campaignName}" launched successfully to brokers!</span>
+                <span>Campaign &ldquo;{campaignName}&rdquo; launched to {sentCount} agents!</span>
               </div>
             )}
 
-            {/* Actions & Reach Estimator */}
+            {/* Actions */}
             <div className="pt-4 border-t border-slate-200 flex items-center justify-between">
               <div>
-                <div className="text-[9px] text-slate-400 uppercase tracking-wider">Estimated Reach</div>
-                <div className="text-sm font-extrabold text-slate-900">2,450 CP Brokers</div>
+                <div className="text-[9px] text-slate-400 uppercase tracking-wider">Filtered Reach</div>
+                <div className="text-sm font-extrabold text-slate-900">{estimatedReach} Agents</div>
               </div>
 
               <div className="flex gap-2 text-sm font-bold">
@@ -251,8 +413,10 @@ export default function CampaignBuilder() {
                 🏢
               </div>
               <div>
-                <div className="font-bold text-[10px]">Prestige Developer</div>
-                <div className="text-[7px] text-[#4ade80]">Official Broadcast Channel</div>
+                <div className="font-bold text-[10px]">Builder Broadcast</div>
+                <div className="text-[7px] text-[#4ade80]">
+                  {selectedLocations.length > 0 ? `To: ${selectedLocations.slice(0, 3).join(", ")}${selectedLocations.length > 3 ? "..." : ""}` : "To: All Agents"}
+                </div>
               </div>
             </div>
 

@@ -3,9 +3,10 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { 
-  Home, Users, Briefcase, FileText, Bell, 
-  Settings, LogOut, RefreshCw, Milestone, Award
+  Home, Users, Briefcase, FileText, Bell, Building2,
+  Settings, LogOut, RefreshCw, Milestone, Award, Bookmark
 } from "lucide-react";
+import { performLogout } from "@/components/SessionSync";
 
 export default function AgentSidebar() {
   const pathname = usePathname();
@@ -15,6 +16,8 @@ export default function AgentSidebar() {
     { name: "Leads", href: "/agent/pipeline", icon: Users },
     { name: "Inventory", href: "/agent/inventory", icon: Briefcase },
     { name: "Launches", href: "/agent/launches", icon: Milestone },
+    { name: "Builders", href: "/agent/builders", icon: Building2 },
+    { name: "Following Projects", href: "/agent/following", icon: Bookmark },
     { name: "Documents", href: "/agent/documents", icon: FileText },
     { name: "Reminders", href: "/agent/reminders", icon: Bell },
     { name: "Rewards", href: "/agent/rewards", icon: Award },
@@ -27,10 +30,10 @@ export default function AgentSidebar() {
         {/* Brand Logo */}
         <div className="flex items-center space-x-2 px-2 py-3 mb-6">
           <div className="w-8 h-8 rounded-lg bg-[#25d366] flex items-center justify-center font-bold text-white shadow-md shadow-[#25d366]/20">
-            a
+            R
           </div>
           <span className="text-xl font-bold tracking-tight text-[#0f172a] flex items-center">
-            agents<span className="text-[#16c47f]">app</span>
+            real<span className="text-[#16c47f]">connect</span>
           </span>
         </div>
 
@@ -80,10 +83,13 @@ export default function AgentSidebar() {
         </div>
 
         <div className="border-t border-slate-200 pt-3">
-          <Link href="/" className="flex items-center space-x-3 px-3.5 py-2 text-xs font-bold uppercase tracking-wider text-slate-400 hover:text-red-500 transition">
+          <button
+            onClick={() => performLogout()}
+            className="flex items-center space-x-3 px-3.5 py-2 text-xs font-bold uppercase tracking-wider text-slate-400 hover:text-red-500 transition w-full text-left"
+          >
             <LogOut className="w-4 h-4 shrink-0" />
             <span>Logout</span>
-          </Link>
+          </button>
         </div>
       </div>
     </div>

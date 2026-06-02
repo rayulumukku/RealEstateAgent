@@ -3,18 +3,24 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { 
-  Building2, PlusCircle, Megaphone, 
-  LogOut, RefreshCw, BarChart3, Users
+  Building2, PlusCircle, Megaphone, Calendar,
+  LogOut, RefreshCw, BarChart3, Users, User, Crown
 } from "lucide-react";
+import { performLogout } from "@/components/SessionSync";
 
 export default function BuilderSidebar() {
   const pathname = usePathname();
 
   const menuItems = [
     { name: "Overview", href: "/builder/dashboard", icon: BarChart3 },
+    { name: "My Projects", href: "/builder/projects", icon: Building2 },
     { name: "Add Project", href: "/builder/projects/new", icon: PlusCircle },
     { name: "Campaigns", href: "/builder/campaigns", icon: Megaphone },
+    { name: "My Events", href: "/builder/events", icon: Calendar },
+    { name: "My Followers", href: "/builder/followers", icon: Users },
+    { name: "Super Builders", href: "/builder/super-builders", icon: Crown },
     { name: "Agent Directory", href: "/builder/agents", icon: Users },
+    { name: "Profile", href: "/builder/profile", icon: User },
   ];
 
   return (
@@ -33,7 +39,11 @@ export default function BuilderSidebar() {
         {/* Navigation Items */}
         <nav className="space-y-1">
           {menuItems.map((item) => {
-            const isActive = pathname.startsWith(item.href);
+            const isActive = item.href === "/builder/projects" 
+              ? pathname === "/builder/projects"
+              : item.href === "/builder/dashboard"
+                ? pathname === "/builder/dashboard"
+                : pathname.startsWith(item.href);
             const Icon = item.icon;
 
             return (
@@ -76,10 +86,13 @@ export default function BuilderSidebar() {
         </div>
 
         <div className="border-t border-slate-200 pt-3">
-          <Link href="/" className="flex items-center space-x-3 px-3.5 py-2 text-xs font-bold uppercase tracking-wider text-slate-400 hover:text-red-500 transition">
+          <button
+            onClick={() => performLogout()}
+            className="flex items-center space-x-3 px-3.5 py-2 text-xs font-bold uppercase tracking-wider text-slate-400 hover:text-red-500 transition w-full text-left"
+          >
             <LogOut className="w-4 h-4 shrink-0" />
             <span>Logout</span>
-          </Link>
+          </button>
         </div>
       </div>
     </div>

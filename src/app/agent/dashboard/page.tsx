@@ -171,7 +171,7 @@ export default function AgentDashboard() {
     );
   }
 
-  const agentFirstName = profile?.name ? profile.name.split(" ")[0] : "Broker";
+  const agentFirstName = profile?.name ? profile.name.split(" ")[0] : "Agent";
 
   return (
     <div className="space-y-6 text-slate-800">
@@ -180,7 +180,7 @@ export default function AgentDashboard() {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-200 pb-5">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Good Morning, {agentFirstName} 👋</h1>
-          <p className="text-[#64748b] text-xs font-semibold mt-0.5">WhatsApp-native Broker OS. Everything is running smoothly.</p>
+          <p className="text-[#64748b] text-xs font-semibold mt-0.5">WhatsApp-native Agent OS. Everything is running smoothly.</p>
         </div>
         
         {/* Profile Card */}

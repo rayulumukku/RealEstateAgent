@@ -1,18 +1,78 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { 
   Building2, Users, Megaphone, CalendarCheck, 
-  ArrowUpRight, BarChart3, TrendingUp, HelpCircle,
-  Plus, Upload, Award, Gift, Sparkles
+  BarChart3, TrendingUp, HelpCircle,
+  Loader2, RefreshCw, UserCheck, Briefcase, MapPin
 } from "lucide-react";
+import { supabase } from "@/lib/supabase";
+
+interface Agent {
+  id: string;
+  name: string;
+  agency_name: string;
+  phone: string;
+  status: string;
+  location: string;
+  points: number;
+  created_at: string;
+}
 
 export default function BuilderDashboard() {
-  const campaignsList = [
-    { name: "Skyline Heights Launch", reach: "2,450 CP Brokers", readRate: "92%", ctr: "18.4%", rsvp: "342 RSVPed" },
-    { name: "Urban Rise Phase-2 CP Meet", reach: "1,890 CP Brokers", readRate: "88%", ctr: "12.5%", rsvp: "156 RSVPed" },
-    { name: "Prestige Commission Booster", reach: "4,112 CP Brokers", readRate: "94%", ctr: "22.1%", rsvp: "750 RSVPed" }
-  ];
+  const [loading, setLoading] = useState(true);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [totalLeads, setTotalLeads] = useState(0);
+  const [totalProjects, setTotalProjects] = useState(0);
+
+  async function loadData() {
+    setLoading(true);
+    try {
+      // Fetch all agents
+      const { data: profiles } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("role", "agent")
+        .order("created_at", { ascending: false });
+
+      if (profiles) {
+        setAgents(profiles);
+      }
+
+      // Fetch total leads count
+      const { count: leadsCount } = await supabase
+        .from("leads")
+        .select("id", { count: "exact", head: true });
+
+      setTotalLeads(leadsCount || 0);
+
+      // Fetch total projects count
+      const { count: projectsCount } = await supabase
+        .from("projects")
+        .select("id", { count: "exact", head: true });
+
+      setTotalProjects(projectsCount || 0);
+    } catch (err) {
+      console.error("Error loading builder data:", err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    loadData();
+  }, []);
+
+  const timeAgo = (dateStr: string) => {
+    const diff = Date.now() - new Date(dateStr).getTime();
+    const mins = Math.floor(diff / 60000);
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    const days = Math.floor(hours / 24);
+    return `${days}d ago`;
+  };
 
   return (
     <div className="space-y-8 text-slate-800">
@@ -21,19 +81,34 @@ export default function BuilderDashboard() {
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-200 pb-5">
         <div>
           <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Builder Hub Overview</h1>
-          <p className="text-[#64748b] text-xs font-semibold mt-0.5">Sponsor webinars, broadcast campaigns, and circulate inventory in realtime.</p>
+          <p className="text-[#64748b] text-xs font-semibold mt-0.5">Live platform data — registered agents, leads, and projects.</p>
         </div>
 
         <div className="flex items-center space-x-3 shrink-0">
+          <button
+            onClick={() => loadData()}
+            className="px-3 py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-xs rounded-xl transition flex items-center space-x-1.5"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+            <span>Refresh</span>
+          </button>
           <Link 
             href="/builder/campaigns" 
-            className="glow-button px-4 py-2.5 bg-indigo-650 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition flex items-center space-x-1.5 shadow-md shadow-indigo-650/10"
+            className="glow-button px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl transition flex items-center space-x-1.5 shadow-md shadow-indigo-600/25"
           >
             <Megaphone className="w-4 h-4 shrink-0" />
             <span>Create Campaign</span>
           </Link>
         </div>
       </div>
+
+      {/* Loading */}
+      {loading && (
+        <div className="flex items-center space-x-2 text-xs font-bold text-slate-400 uppercase tracking-wider">
+          <Loader2 className="w-4 h-4 animate-spin text-indigo-500" />
+          <span>Loading platform data...</span>
+        </div>
+      )}
 
       {/* Quick Actions Row */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
@@ -47,7 +122,7 @@ export default function BuilderDashboard() {
             <span className="text-lg mb-1">🚜</span>
             <span>Upload Inventory</span>
           </Link>
-          <button onClick={() => alert("Sponsor Webinar: generate ₹500 Amazon rewards voucher pass.")} className="p-3 bg-slate-50 hover:bg-indigo-50/50 rounded-xl border border-slate-200 text-slate-700 flex flex-col items-center text-center transition">
+          <button onClick={() => alert("Sponsor Webinar: generate rewards voucher pass.")} className="p-3 bg-slate-50 hover:bg-indigo-50/50 rounded-xl border border-slate-200 text-slate-700 flex flex-col items-center text-center transition">
             <span className="text-lg mb-1">🎓</span>
             <span>Sponsor Webinar</span>
           </button>
@@ -62,11 +137,11 @@ export default function BuilderDashboard() {
         </div>
       </div>
 
-      {/* Metrics Row */}
+      {/* Metrics Row — LIVE from Supabase */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-2xl border border-slate-200 flex items-center justify-between shadow-sm">
           <div>
-            <div className="text-2xl font-extrabold text-slate-900">12</div>
+            <div className="text-2xl font-extrabold text-slate-900">{totalProjects}</div>
             <div className="text-xs text-slate-400 mt-1 font-bold uppercase tracking-wider">Active Projects</div>
           </div>
           <div className="w-9 h-9 rounded-lg bg-indigo-50 text-indigo-500 flex items-center justify-center">
@@ -76,8 +151,8 @@ export default function BuilderDashboard() {
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200 flex items-center justify-between shadow-sm">
           <div>
-            <div className="text-2xl font-extrabold text-slate-900">8,452</div>
-            <div className="text-xs text-slate-400 mt-1 font-bold uppercase tracking-wider">CP Reach</div>
+            <div className="text-2xl font-extrabold text-slate-900">{agents.length}</div>
+            <div className="text-xs text-slate-400 mt-1 font-bold uppercase tracking-wider">Registered Agents</div>
           </div>
           <div className="w-9 h-9 rounded-lg bg-indigo-50 text-indigo-500 flex items-center justify-center">
             <Users className="w-5 h-5" />
@@ -86,107 +161,73 @@ export default function BuilderDashboard() {
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200 flex items-center justify-between shadow-sm">
           <div>
-            <div className="text-2xl font-extrabold text-slate-900">24,200</div>
-            <div className="text-xs text-slate-400 mt-1 font-bold uppercase tracking-wider">Views</div>
+            <div className="text-2xl font-extrabold text-slate-900">{totalLeads}</div>
+            <div className="text-xs text-slate-400 mt-1 font-bold uppercase tracking-wider">Total Leads</div>
           </div>
           <div className="w-9 h-9 rounded-lg bg-indigo-50 text-indigo-500 flex items-center justify-center">
-            <TrendingUp className="w-5 h-5" />
+            <Briefcase className="w-5 h-5" />
           </div>
         </div>
 
         <div className="bg-white p-5 rounded-2xl border border-slate-200 flex items-center justify-between shadow-sm">
           <div>
-            <div className="text-2xl font-extrabold text-slate-900">1,248</div>
-            <div className="text-xs text-slate-400 mt-1 font-bold uppercase tracking-wider">RSVP Invites</div>
+            <div className="text-2xl font-extrabold text-slate-900">{agents.filter(a => a.status === "approved").length}</div>
+            <div className="text-xs text-slate-400 mt-1 font-bold uppercase tracking-wider">Approved Agents</div>
           </div>
           <div className="w-9 h-9 rounded-lg bg-[#25d366]/10 text-[#16c47f] flex items-center justify-center">
-            <CalendarCheck className="w-5 h-5" />
+            <UserCheck className="w-5 h-5" />
           </div>
         </div>
       </div>
 
-      {/* Performance Split Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
-        {/* Left - CSS Doughnut Performance */}
-        <div className="lg:col-span-5 bg-white p-6 rounded-2xl border border-slate-200 flex flex-col justify-between shadow-sm">
-          <div>
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 flex items-center justify-between">
-              <span>Campaign Delivery ROI</span>
-              <HelpCircle className="w-4 h-4 text-slate-400 cursor-pointer" />
-            </h3>
-
-            <div className="py-6 flex justify-center items-center">
-              <div className="relative w-36 h-36 rounded-full border-8 border-slate-100 flex items-center justify-center shadow-inner">
-                <div className="absolute inset-0 rounded-full border-8 border-indigo-600 border-t-transparent border-l-transparent"></div>
-                
-                <div className="text-center">
-                  <div className="text-3xl font-extrabold text-slate-900">92%</div>
-                  <div className="text-[9px] text-[#64748b] font-bold uppercase tracking-wider mt-0.5">Read Rate</div>
-                </div>
-              </div>
-            </div>
-
-            {/* Legend */}
-            <div className="grid grid-cols-3 gap-2 text-center text-xs font-bold pt-4 border-t border-slate-200/80">
-              <div>
-                <div className="text-indigo-500">92%</div>
-                <div className="text-[9px] text-slate-400 uppercase mt-0.5">Read</div>
-              </div>
-              <div>
-                <div className="text-purple-500">97%</div>
-                <div className="text-[9px] text-slate-400 uppercase mt-0.5">Delivered</div>
-              </div>
-              <div>
-                <div className="text-[#16c47f]">18.4%</div>
-                <div className="text-[9px] text-slate-400 uppercase mt-0.5">CTR</div>
-              </div>
-            </div>
-          </div>
+      {/* Agent Directory — LIVE from Supabase */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+        <div className="flex justify-between items-center mb-6">
+          <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center space-x-1.5">
+            <Users className="w-4 h-4 text-indigo-500" />
+            <span>Agent Directory ({agents.length})</span>
+          </h3>
+          <Link href="/builder/agents" className="text-xs text-indigo-600 font-bold uppercase hover:underline">
+            View All
+          </Link>
         </div>
 
-        {/* Right - Campaigns list */}
-        <div className="lg:col-span-7 bg-white p-6 rounded-2xl border border-slate-200 space-y-6 shadow-sm">
-          <div className="flex justify-between items-center">
-            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center space-x-1.5">
-              <BarChart3 className="w-4 h-4 text-indigo-500" />
-              <span>Active WhatsApp Campaigns</span>
-            </h3>
-            <span className="text-[9px] text-[#16c47f] font-bold uppercase tracking-wider">
-              Realtime feed
-            </span>
-          </div>
-
-          <div className="space-y-3">
-            {campaignsList.map((camp, idx) => (
-              <div 
-                key={idx} 
-                className="p-4 bg-slate-50 rounded-xl border border-slate-200 hover:border-slate-300 transition flex justify-between items-center text-xs font-semibold text-slate-655"
-              >
-                <div className="space-y-1">
-                  <div className="font-extrabold text-slate-900">{camp.name}</div>
-                  <div className="text-[10px] text-slate-500">
-                    Sponsor segment: <span className="text-slate-700">{camp.reach}</span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-3 gap-4 text-right">
-                  <div>
-                    <div className="text-[8px] text-slate-400 uppercase">CTR</div>
-                    <div className="font-bold text-indigo-500 mt-0.5">{camp.ctr}</div>
-                  </div>
-                  <div>
-                    <div className="text-[8px] text-slate-400 uppercase">Read</div>
-                    <div className="font-bold text-slate-800 mt-0.5">{camp.readRate}</div>
-                  </div>
-                  <div>
-                    <div className="text-[8px] text-slate-400 uppercase">RSVPs</div>
-                    <div className="font-bold text-[#16c47f] mt-0.5">{camp.rsvp.split(" ")[0]}</div>
-                  </div>
+        <div className="space-y-3 max-h-[500px] overflow-y-auto">
+          {agents.length === 0 && !loading && (
+            <div className="text-center text-slate-400 text-xs py-8">No agents registered yet.</div>
+          )}
+          {agents.map((agent) => (
+            <div key={agent.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200 hover:border-indigo-200 transition flex justify-between items-center text-xs font-semibold">
+              <div>
+                <div className="font-extrabold text-slate-900">{agent.name}</div>
+                <div className="text-[10px] text-slate-500 mt-0.5 flex items-center space-x-2">
+                  <span>{agent.agency_name || "Independent Agent"}</span>
+                  {agent.location && (
+                    <>
+                      <span>·</span>
+                      <span className="flex items-center">
+                        <MapPin className="w-2.5 h-2.5 mr-0.5" />
+                        {agent.location}
+                      </span>
+                    </>
+                  )}
                 </div>
               </div>
-            ))}
-          </div>
+              <div className="text-right">
+                <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                  agent.status === "approved" 
+                    ? "bg-emerald-50 text-emerald-600" 
+                    : "bg-amber-50 text-amber-600"
+                }`}>
+                  {agent.status === "approved" ? "Approved" : "Pending"}
+                </span>
+                <div className="text-[9px] text-slate-400 mt-1">Joined {timeAgo(agent.created_at)}</div>
+                {agent.points > 0 && (
+                  <div className="text-[9px] text-indigo-500 font-bold mt-0.5">{agent.points} XP</div>
+                )}
+              </div>
+            </div>
+          ))}
         </div>
       </div>
     </div>

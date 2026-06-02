@@ -3,11 +3,11 @@
 import { useState, useEffect } from "react";
 import { 
   Users, Search, MapPin, Building2, 
-  Trophy, Phone, Loader2, UserCheck
+  Trophy, Loader2, UserCheck
 } from "lucide-react";
 import { getVerificationRequests } from "@/app/admin/verification/actions";
 
-interface Broker {
+interface Agent {
   id: string;
   name: string;
   agency_name: string;
@@ -19,7 +19,7 @@ interface Broker {
 }
 
 export default function AgentDirectory() {
-  const [agents, setAgents] = useState<Broker[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -29,13 +29,13 @@ export default function AgentDirectory() {
       try {
         const res = await getVerificationRequests();
         if (res.success && res.profiles) {
-          // Filter to only show approved channel partners (brokers)
+          // Filter to only show approved channel partners (agents)
           const approved = res.profiles
             .filter((p: any) => p.status === "approved")
             .map((p: any) => ({
               id: p.id,
               name: p.name,
-              agency_name: p.agency_name || "Independent Broker",
+              agency_name: p.agency_name || "Independent Agent",
               phone: p.phone,
               cp_id: p.cp_id || "Pending",
               points: p.points || 0,
@@ -133,10 +133,7 @@ export default function AgentDirectory() {
                     <Building2 className="w-4 h-4 text-slate-400 shrink-0" />
                     <span>{agent.agency_name}</span>
                   </div>
-                  <div className="flex items-center space-x-2">
-                    <Phone className="w-4 h-4 text-slate-400 shrink-0" />
-                    <span>{agent.phone}</span>
-                  </div>
+
                   <div className="flex items-center space-x-2">
                     <MapPin className="w-4 h-4 text-slate-400 shrink-0" />
                     <span>{agent.location}</span>
