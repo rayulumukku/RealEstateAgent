@@ -15,7 +15,7 @@ export default function AgentSidebar() {
     { name: "Home", href: "/agent/dashboard", icon: Home },
     { name: "Leads", href: "/agent/pipeline", icon: Users },
     { name: "Inventory", href: "/agent/inventory", icon: Briefcase },
-    { name: "Launches", href: "/agent/launches", icon: Milestone },
+    { name: "Invitations", href: "/agent/invitations", icon: Milestone },
     { name: "Builders", href: "/agent/builders", icon: Building2 },
     { name: "Following Projects", href: "/agent/following", icon: Bookmark },
     { name: "Documents", href: "/agent/documents", icon: FileText },

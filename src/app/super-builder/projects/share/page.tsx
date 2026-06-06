@@ -50,11 +50,12 @@ export default function ShareProjectsPage() {
 
       if (projectsData) setProjects(projectsData);
 
-      // Load all builders from the database
+      // Load only sub-builders created under this super-builder
       const { data: buildersData } = await supabase
         .from("profiles")
         .select("id, name, phone, agency_name, location")
         .eq("role", "builder")
+        .eq("parent_id", meData.user.id)
         .order("name", { ascending: true });
 
       if (buildersData) setBuilders(buildersData);

@@ -18,6 +18,7 @@ interface ProfileData {
   location: string;
   points: number;
   role: string;
+  is_rera_approved?: boolean;
 }
 
 export default function AgentProfile() {
@@ -183,7 +184,12 @@ export default function AgentProfile() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <label className="block uppercase tracking-wider text-[10px]">RERA Registration</label>
+                <div className="flex justify-between items-center">
+                  <label className="block uppercase tracking-wider text-[10px]">RERA Registration</label>
+                  {profile?.is_rera_approved && (
+                    <span className="text-[9px] bg-indigo-50 text-indigo-600 border border-indigo-200 px-1.5 py-0.5 rounded font-bold uppercase tracking-wider">Approved</span>
+                  )}
+                </div>
                 <input 
                   type="text" 
                   value={rera}
@@ -253,6 +259,23 @@ export default function AgentProfile() {
                     <div className="text-sm font-extrabold text-slate-900 mt-0.5 tracking-wider">{profile.cp_id}</div>
                   </div>
                   <Award className="w-5 h-5 text-[#25d366]" />
+                </div>
+              )}
+
+              {profile?.is_rera_approved ? (
+                <div className="p-3.5 bg-indigo-50 border border-indigo-200 rounded-xl flex items-center justify-between">
+                  <div>
+                    <div className="text-[8px] text-indigo-500 uppercase font-bold tracking-wider">RERA Verification</div>
+                    <div className="text-sm font-extrabold text-indigo-700 mt-0.5 tracking-wider">RERA Approved</div>
+                  </div>
+                  <CheckCircle2 className="w-5 h-5 text-indigo-600" />
+                </div>
+              ) : (
+                <div className="p-3.5 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between">
+                  <div>
+                    <div className="text-[8px] text-slate-400 uppercase font-bold tracking-wider">RERA Verification</div>
+                    <div className="text-sm font-bold text-slate-500 mt-0.5">Not RERA Approved</div>
+                  </div>
                 </div>
               )}
 

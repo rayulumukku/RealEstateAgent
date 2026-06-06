@@ -13,6 +13,11 @@ interface UserProfile {
   agency_name: string;
   location: string;
   created_at: string;
+  parent_id?: string | null;
+  parent?: {
+    name: string;
+    agency_name: string;
+  } | null;
 }
 
 export default function SuperAdminUsersPage() {
@@ -32,7 +37,24 @@ export default function SuperAdminUsersPage() {
         .select("*")
         .neq("role", "super_admin")
         .order("created_at", { ascending: false });
-      if (data) setUsers(data);
+      if (data) {
+        const usersWithParent = data.map((u: any) => {
+          if (u.parent_id) {
+            const parentProfile = data.find((parent: any) => parent.id === u.parent_id);
+            if (parentProfile) {
+              return {
+                ...u,
+                parent: {
+                  name: parentProfile.name,
+                  agency_name: parentProfile.agency_name
+                }
+              };
+            }
+          }
+          return u;
+        });
+        setUsers(usersWithParent);
+      }
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
   }
@@ -168,11 +190,18 @@ export default function SuperAdminUsersPage() {
             filteredUsers.map((user) => (
               <div key={user.id} className={`grid grid-cols-[1fr_auto_auto_auto_auto] gap-4 px-6 py-4 items-center hover:bg-slate-50 transition ${user.status === "suspended" ? "bg-red-50/30" : ""}`}>
                 <div>
-                  <p className="text-sm font-bold text-slate-900 flex items-center space-x-1">
-                    {user.role === "admin" && <Shield className="w-3 h-3 text-emerald-500" />}
-                    {user.role === "super_builder" && <Crown className="w-3 h-3 text-purple-500" />}
-                    <span>{user.name || "Unnamed"}</span>
-                  </p>
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <p className="text-sm font-bold text-slate-900 flex items-center space-x-1">
+                      {user.role === "admin" && <Shield className="w-3 h-3 text-emerald-500" />}
+                      {user.role === "super_builder" && <Crown className="w-3 h-3 text-purple-500" />}
+                      <span>{user.name || "Unnamed"}</span>
+                    </p>
+                    {user.parent && (
+                      <span className="px-1.5 py-0.5 bg-purple-50 text-purple-650 border border-purple-200 rounded text-[8px] font-extrabold">
+                        Sub-builder of {user.parent.agency_name || user.parent.name}
+                      </span>
+                    )}
+                  </div>
                   <p className="text-[10px] text-slate-500">{user.agency_name || "—"} · {user.phone}</p>
                 </div>
                 <span className={`px-2.5 py-1 rounded-lg text-[9px] font-bold uppercase tracking-wider border ${getRoleBadge(user.role)}`}>

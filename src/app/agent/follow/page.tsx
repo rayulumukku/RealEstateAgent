@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
-import { respondToInvitation } from "@/app/agent/launches/actions";
+import { respondToInvitation } from "@/app/agent/invitations/actions";
 
 export default function FollowProjectPage() {
   const searchParams = useSearchParams();

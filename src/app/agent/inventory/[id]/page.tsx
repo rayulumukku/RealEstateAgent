@@ -1,186 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import {
   ArrowLeft, MapPin, BadgeCheck, FileText,
   Share2, CheckCircle2, ChevronRight, Building,
-  X, Grid, ShieldCheck,
+  X, Grid, ShieldCheck, Loader2,
 } from "lucide-react";
-
-interface Unit {
-  unitNumber: string;
-  bhk: string;
-  sqft: number;
-  price: string;
-  status: "Available" | "Blocked" | "Sold";
-  facing: string;
-}
-
-interface ProjectDetail {
-  id: string;
-  name: string;
-  location: string;
-  city: string;
-  builder: string;
-  rera: string;
-  priceRange: string;
-  startingPrice: string;
-  config: string;
-  possession: string;
-  totalLand: string;
-  structures: string;
-  overview: string;
-  amenities: string[];
-  floorplans: { name: string; size: string; rooms: string }[];
-  pricing: { configuration: string; size: string; price: string }[];
-  units: Unit[];
-}
-
-// Project catalogue keyed by the same ids used on the inventory list page.
-// This will be replaced with a Supabase query in a follow-up PR; for now
-// the detail screen at least respects the id from the URL.
-const PROJECTS: Record<string, ProjectDetail> = {
-  "skyline-heights": {
-    id: "skyline-heights",
-    name: "Skyline Heights",
-    location: "Kokapet",
-    city: "Hyderabad",
-    builder: "Prestige Group",
-    rera: "P02400003512",
-    priceRange: "₹1.82 Cr - ₹2.75 Cr",
-    startingPrice: "₹1.82 Cr*",
-    config: "3 & 4 BHK",
-    possession: "Dec 2026",
-    totalLand: "8.5 Acres",
-    structures: "4 Towers (G+32)",
-    overview:
-      "Skyline Heights in Kokapet, Hyderabad is a premium gated community designed for modern luxury living. Featuring high-end 3 and 4 BHK residential apartments, the development offers world-class amenities, excellent connectivity to the financial district, and gorgeous views of the Gandipet lake. Built using advanced Mivan technology for superior construction quality.",
-    amenities: [
-      "Clubhouse", "Swimming Pool", "Gymnasium", "Children Play Area",
-      "24/7 Multi-tier Security", "100% Power Backup", "Indoor Games Room",
-      "Jogging Track", "Multipurpose Hall", "Landscaped Gardens",
-    ],
-    floorplans: [
-      { name: "3 BHK Type A", size: "1850 Sqft", rooms: "3 BHK + 3 Baths" },
-      { name: "3 BHK Type B", size: "2150 Sqft", rooms: "3 BHK + 3 Baths + Servant" },
-      { name: "4 BHK Type A", size: "2600 Sqft", rooms: "4 BHK + 4 Baths + Home Theatre" },
-    ],
-    pricing: [
-      { configuration: "3 BHK", size: "1850 Sqft", price: "₹1.82 Cr Onwards" },
-      { configuration: "3 BHK + Lounge", size: "2150 Sqft", price: "₹2.12 Cr Onwards" },
-      { configuration: "4 BHK", size: "2600 Sqft", price: "₹2.55 Cr Onwards" },
-    ],
-    units: [
-      { unitNumber: "A-302", bhk: "3 BHK", sqft: 1850, price: "₹1.82 Cr", status: "Available", facing: "East" },
-      { unitNumber: "A-504", bhk: "3 BHK", sqft: 1850, price: "₹1.84 Cr", status: "Available", facing: "West" },
-      { unitNumber: "A-801", bhk: "3 BHK", sqft: 2150, price: "₹2.15 Cr", status: "Blocked", facing: "North" },
-      { unitNumber: "B-204", bhk: "4 BHK", sqft: 2600, price: "₹2.55 Cr", status: "Available", facing: "East" },
-      { unitNumber: "B-1202", bhk: "4 BHK", sqft: 2600, price: "₹2.62 Cr", status: "Sold", facing: "North-East" },
-    ],
-  },
-  "green-meadows": {
-    id: "green-meadows",
-    name: "Green Meadows Plots",
-    location: "Gachibowli",
-    city: "Hyderabad",
-    builder: "GMR Infra",
-    rera: "P02400004210",
-    priceRange: "₹1.40 Cr - ₹1.95 Cr",
-    startingPrice: "₹1.40 Cr*",
-    config: "Open Plots",
-    possession: "Ready",
-    totalLand: "12 Acres",
-    structures: "Gated layout, 84 plots",
-    overview:
-      "Green Meadows is a fully-developed plotted layout in Gachibowli with concrete roads, perimeter fencing, underground electrical cabling, and 24/7 security. Located 6 km from the Financial District, with multiple corner and east-facing options available.",
-    amenities: [
-      "Concrete Roads", "Underground Electricity", "Perimeter Fencing",
-      "24/7 Security", "Children's Park", "Avenue Plantation",
-    ],
-    floorplans: [
-      { name: "200 Sq Yards", size: "1800 Sqft", rooms: "Standard plot" },
-      { name: "267 Sq Yards", size: "2400 Sqft", rooms: "Premium plot" },
-      { name: "333 Sq Yards", size: "3000 Sqft", rooms: "Corner plot" },
-    ],
-    pricing: [
-      { configuration: "200 Sq Yards", size: "1800 Sqft", price: "₹1.40 Cr Onwards" },
-      { configuration: "267 Sq Yards", size: "2400 Sqft", price: "₹1.65 Cr Onwards" },
-      { configuration: "333 Sq Yards", size: "3000 Sqft", price: "₹1.95 Cr Onwards" },
-    ],
-    units: [
-      { unitNumber: "Plot 18", bhk: "Plot", sqft: 3000, price: "₹1.95 Cr", status: "Available", facing: "North" },
-      { unitNumber: "Plot 42", bhk: "Plot", sqft: 2400, price: "₹1.65 Cr", status: "Available", facing: "East" },
-      { unitNumber: "Plot 51", bhk: "Plot", sqft: 1800, price: "₹1.40 Cr", status: "Blocked", facing: "South" },
-    ],
-  },
-  "luxury-haven": {
-    id: "luxury-haven",
-    name: "Prestige Villa Haven",
-    location: "Jubilee Hills",
-    city: "Hyderabad",
-    builder: "Prestige Group",
-    rera: "P02400005891",
-    priceRange: "₹4.50 Cr - ₹7.20 Cr",
-    startingPrice: "₹4.50 Cr*",
-    config: "4 & 5 BHK Villas",
-    possession: "Mar 2027",
-    totalLand: "5.2 Acres",
-    structures: "24 Independent Villas",
-    overview:
-      "Ultra-luxury villas in Jubilee Hills with private pools, smart home automation, and 4200+ sqft built-up areas. Each villa includes a private garden, dedicated lift, and home theatre.",
-    amenities: [
-      "Private Pool per Villa", "Smart Home Automation", "Dedicated Villa Lift",
-      "Home Theatre", "Private Garden", "Concierge Services",
-    ],
-    floorplans: [
-      { name: "4 BHK Villa", size: "4200 Sqft", rooms: "4 BHK + 5 Baths + Theatre" },
-      { name: "5 BHK Villa", size: "5800 Sqft", rooms: "5 BHK + 6 Baths + Pool" },
-    ],
-    pricing: [
-      { configuration: "4 BHK Villa", size: "4200 Sqft", price: "₹4.50 Cr Onwards" },
-      { configuration: "5 BHK Villa", size: "5800 Sqft", price: "₹7.20 Cr Onwards" },
-    ],
-    units: [
-      { unitNumber: "Villa 04", bhk: "4 BHK", sqft: 4200, price: "₹4.50 Cr", status: "Available", facing: "East" },
-      { unitNumber: "Villa 11", bhk: "5 BHK", sqft: 5800, price: "₹7.20 Cr", status: "Blocked", facing: "North" },
-      { unitNumber: "Villa 18", bhk: "5 BHK", sqft: 5800, price: "₹7.40 Cr", status: "Sold", facing: "East" },
-    ],
-  },
-  "hitech-square": {
-    id: "hitech-square",
-    name: "Hitech Square Commercial",
-    location: "Hitech City",
-    city: "Hyderabad",
-    builder: "L&T Realty",
-    rera: "P02400007021",
-    priceRange: "₹5.50 Cr - ₹12.00 Cr",
-    startingPrice: "₹5.50 Cr*",
-    config: "Office Floors & Retail",
-    possession: "Sep 2026",
-    totalLand: "3.8 Acres",
-    structures: "1 Tower (G+22) + Retail Podium",
-    overview:
-      "Grade-A commercial tower in the heart of Hitech City with 60-foot frontage, 25 dedicated parking bays per floor, LEED Gold certification, and high-speed elevators.",
-    amenities: [
-      "Grade-A Lobby", "25 Parking Bays / Floor", "LEED Gold Certified",
-      "High-speed Elevators", "Backup Power", "F&B Podium",
-    ],
-    floorplans: [
-      { name: "Office Floor", size: "12,000 Sqft", rooms: "Open-plan office" },
-      { name: "Retail Unit", size: "1,200 Sqft", rooms: "Ground-floor retail" },
-    ],
-    pricing: [
-      { configuration: "Retail Unit", size: "1,200 Sqft", price: "₹5.50 Cr Onwards" },
-      { configuration: "Office Floor", size: "12,000 Sqft", price: "₹12.00 Cr Onwards" },
-    ],
-    units: [
-      { unitNumber: "GF-04", bhk: "Retail", sqft: 1200, price: "₹5.50 Cr", status: "Available", facing: "East" },
-      { unitNumber: "L-08", bhk: "Office Floor", sqft: 12000, price: "₹12.00 Cr", status: "Available", facing: "North" },
-    ],
-  },
-};
+import { getAgentInventoryProjectDetail, ProjectDetail } from "../actions";
 
 export default function ProjectDetails() {
   const params = useParams();
@@ -188,8 +16,24 @@ export default function ProjectDetails() {
 
   const [activeTab, setActiveTab] = useState<"overview" | "amenities" | "floorplans" | "pricing">("overview");
   const [showUnitsModal, setShowUnitsModal] = useState(false);
+  const [project, setProject] = useState<ProjectDetail | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  const project = PROJECTS[id];
+  useEffect(() => {
+    if (!id) return;
+    getAgentInventoryProjectDetail(id).then((data) => {
+      setProject(data);
+      setLoading(false);
+    });
+  }, [id]);
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20 bg-[#f8fafc] min-h-screen">
+        <Loader2 className="w-8 h-8 animate-spin text-[#25d366]" />
+      </div>
+    );
+  }
 
   // Graceful fallback when the id is unknown — no more silently-wrong page.
   if (!project) {
@@ -417,7 +261,7 @@ export default function ProjectDetails() {
       {/* Available Units Modal */}
       {showUnitsModal && (
         <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl bg-white p-6 rounded-2xl border border-slate-200 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200 text-slate-800">
+          <div className="w-full max-w-2xl max-h-[85vh] bg-white p-6 rounded-2xl border border-slate-200 shadow-2xl relative animate-in fade-in zoom-in-95 duration-200 text-slate-800 flex flex-col overflow-hidden">
             <button
               onClick={() => setShowUnitsModal(false)}
               className="absolute top-4 right-4 text-slate-400 hover:text-slate-655 p-1 rounded-lg hover:bg-slate-50 transition"
@@ -431,7 +275,7 @@ export default function ProjectDetails() {
             </h2>
             <p className="text-xs text-slate-500 mb-6">Real-time availability status for bookings.</p>
 
-            <div className="overflow-x-auto border border-slate-200 rounded-xl">
+            <div className="flex-1 overflow-auto border border-slate-200 rounded-xl min-h-0">
               <table className="w-full text-left text-xs font-semibold">
                 <thead className="bg-slate-50 text-slate-400 font-bold uppercase tracking-wider text-[9px]">
                   <tr>

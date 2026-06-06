@@ -1,8 +1,10 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Building2, Loader2, MapPin, Users, Crown, Clock, Search, X, ChevronDown, ChevronUp, Pencil, Trash2, Plus, Save } from "lucide-react";
+import { Building2, Loader2, MapPin, Users, Crown, Clock, Search, X, ChevronDown, ChevronUp, Pencil, Trash2, Plus, Save, FileSpreadsheet } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { getProjectInventoryUnits } from "@/app/builder/inventory/actions";
+import * as XLSX from "xlsx";
 
 interface ProjectWithDetails {
   id: string;
@@ -17,6 +19,7 @@ interface ProjectWithDetails {
   developer_role: string;
   developer_phone: string;
   shares: { builder_name: string; builder_phone: string; builder_company: string; status: string; shared_at: string }[];
+  unitStats?: { total: number; available: number; booked: number; sold: number; blocked: number; hold: number };
 }
 
 interface BuilderOption {
@@ -47,6 +50,12 @@ export default function AdminProjectsPage() {
   const [creating, setCreating] = useState(false);
   const [builders, setBuilders] = useState<BuilderOption[]>([]);
 
+  // Units Modal state
+  const [selectedProjectUnits, setSelectedProjectUnits] = useState<any[]>([]);
+  const [unitsModalProject, setUnitsModalProject] = useState<ProjectWithDetails | null>(null);
+  const [loadingUnits, setLoadingUnits] = useState(false);
+  const [unitsSearch, setUnitsSearch] = useState("");
+
   useEffect(() => {
     loadProjects();
     loadBuilders();
@@ -61,6 +70,56 @@ export default function AdminProjectsPage() {
     if (data) setBuilders(data);
   }
 
+  async function openUnitsModal(project: ProjectWithDetails) {
+    setUnitsModalProject(project);
+    setLoadingUnits(true);
+    try {
+      const units = await getProjectInventoryUnits(project.id);
+      setSelectedProjectUnits(units);
+    } catch (err) {
+      console.error("Error loading units:", err);
+      alert("Error loading inventory units.");
+    } finally {
+      setLoadingUnits(false);
+    }
+  }
+
+  function handleDownloadExcel() {
+    if (!unitsModalProject || !selectedProjectUnits || selectedProjectUnits.length === 0) return;
+    
+    // Format the data for the Excel sheet
+    const dataToExport = selectedProjectUnits.map((u) => {
+      // Find any extra details (excluding known keys)
+      const knownKeys = ["apartment", "unitname", "unitno", "flat", "plot", "name", "number", "block", "tower", "floorno", "floor", "facing", "sqft", "area", "size", "sft", "price", "cost", "value", "status", "availability"];
+      const extraDetails = Object.entries(u.details || {})
+        .filter(([k]) => !knownKeys.some(p => k.toLowerCase().replace(/[\s_-]/g, "").includes(p)))
+        .map(([k, v]) => `${k}: ${v}`)
+        .join(", ");
+
+      return {
+        "Unit / Plot": u.unit_name,
+        "Block / Tower": u.tower || "—",
+        "Floor": u.floor_number !== null ? u.floor_number : "—",
+        "Facing": u.facing || "—",
+        "Area (Sqft)": u.carpet_area_sqft || "—",
+        "Price": u.price || "—",
+        "BHK Type": u.bhk_type || "—",
+        "Status": u.status,
+        "Other Details": extraDetails || "—"
+      };
+    });
+
+    // Create a worksheet
+    const worksheet = XLSX.utils.json_to_sheet(dataToExport);
+
+    // Create a workbook
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Inventory");
+
+    // Generate buffer and trigger download
+    XLSX.writeFile(workbook, `${unitsModalProject.name.replace(/[^a-zA-Z0-9]/g, "_")}_inventory.xlsx`);
+  }
+
   async function loadProjects() {
     setLoading(true);
     try {
@@ -73,6 +132,10 @@ export default function AdminProjectsPage() {
         .from("project_shares")
         .select("*, profiles!project_shares_builder_id_fkey(name, phone, agency_name)")
         .order("created_at", { ascending: false });
+
+      const { data: unitsData } = await supabase
+        .from("inventory_units")
+        .select("project_id, status");
 
       const sharesMap = new Map<string, any[]>();
       if (sharesData) {
@@ -89,12 +152,27 @@ export default function AdminProjectsPage() {
         }
       }
 
+      const unitsMap = new Map<string, { total: number; available: number; booked: number; sold: number; blocked: number; hold: number }>();
+      if (unitsData) {
+        for (const u of unitsData) {
+          const stats = unitsMap.get(u.project_id) || { total: 0, available: 0, booked: 0, sold: 0, blocked: 0, hold: 0 };
+          stats.total++;
+          const s = (u.status || "available").toLowerCase();
+          if (s === "available") stats.available++;
+          else if (s === "booked") stats.booked++;
+          else if (s === "sold") stats.sold++;
+          else if (s === "blocked") stats.blocked++;
+          else if (s === "hold") stats.hold++;
+          unitsMap.set(u.project_id, stats);
+        }
+      }
+
       if (projectsData) {
         setProjects(projectsData.map((p: any) => ({
           id: p.id,
           name: p.name,
           location: p.location || "",
-          city: p.city || "",
+          city: p.details?.city || p.city || "",
           price_range: p.price_range || "",
           type: p.type || "Residential",
           created_at: p.created_at,
@@ -103,6 +181,7 @@ export default function AdminProjectsPage() {
           developer_role: p.profiles?.role || "builder",
           developer_phone: p.profiles?.phone || "",
           shares: sharesMap.get(p.id) || [],
+          unitStats: unitsMap.get(p.id) || { total: 0, available: 0, booked: 0, sold: 0, blocked: 0, hold: 0 }
         })));
       }
     } catch (err) {
@@ -339,12 +418,52 @@ export default function AdminProjectsPage() {
                           <span className="font-bold text-slate-800 flex items-center space-x-1">{project.developer_role === "super_builder" && <Crown className="w-3 h-3 text-purple-500" />}<span>{project.developer_name}</span></span>
                           <span className="text-slate-400">({project.developer_phone})</span>
                         </div>
+                        {project.unitStats && project.unitStats.total > 0 && (
+                          <div className="flex flex-wrap items-center gap-1.5 text-xs font-semibold text-slate-500 mt-1.5">
+                            <span className="bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded font-bold uppercase text-[9px] tracking-wider">
+                              {project.unitStats.total} units
+                            </span>
+                            {project.unitStats.available > 0 && (
+                              <span className="text-emerald-600 font-bold bg-emerald-50 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider">
+                                {project.unitStats.available} Available
+                              </span>
+                            )}
+                            {project.unitStats.booked > 0 && (
+                              <span className="text-amber-600 font-bold bg-amber-50 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider">
+                                {project.unitStats.booked} Booked
+                              </span>
+                            )}
+                            {project.unitStats.sold > 0 && (
+                              <span className="text-red-600 font-bold bg-red-50 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider">
+                                {project.unitStats.sold} Sold
+                              </span>
+                            )}
+                            {project.unitStats.blocked > 0 && (
+                              <span className="text-slate-600 font-bold bg-slate-50 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider">
+                                {project.unitStats.blocked} Blocked
+                              </span>
+                            )}
+                            {project.unitStats.hold > 0 && (
+                              <span className="text-amber-700 font-bold bg-amber-100/50 px-1.5 py-0.5 rounded text-[9px] uppercase tracking-wider">
+                                {project.unitStats.hold} Hold
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <div className="flex items-center space-x-2 shrink-0">
                         <div className="text-right mr-3">
                           <div className="flex items-center space-x-1 text-xs text-slate-500"><Users className="w-3 h-3" /><span className="font-bold">{project.shares.filter(s => s.status === "active").length}</span></div>
                           <p className="text-[10px] text-slate-400">{timeAgo(project.created_at)}</p>
                         </div>
+                        <button 
+                          onClick={() => openUnitsModal(project)} 
+                          className="px-3 py-1 bg-indigo-50 border border-indigo-250 text-indigo-650 hover:bg-indigo-100 font-bold text-[10px] rounded-lg transition uppercase tracking-wider flex items-center space-x-1 shrink-0"
+                          title="View Inventory Units"
+                        >
+                          <Building2 className="w-3 h-3 text-indigo-500" />
+                          <span>Units</span>
+                        </button>
                         <button onClick={() => startEdit(project)} className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition" title="Edit"><Pencil className="w-4 h-4" /></button>
                         <button onClick={() => handleDelete(project.id, project.name)} disabled={deletingId === project.id} className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition disabled:opacity-50" title="Delete">{deletingId === project.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}</button>
                         <button onClick={() => setExpandedProject(expandedProject === project.id ? null : project.id)} className="p-2 text-slate-400 hover:text-slate-600">{expandedProject === project.id ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}</button>
@@ -376,6 +495,141 @@ export default function AdminProjectsPage() {
           ))
         )}
       </div>
+
+      {/* Units Modal */}
+      {unitsModalProject && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-2xl w-full max-w-4xl max-h-[85vh] flex flex-col overflow-hidden">
+            {/* Header */}
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <div>
+                <h3 className="text-lg font-extrabold text-slate-900">{unitsModalProject.name} Inventory</h3>
+                <p className="text-xs text-slate-500 font-semibold mt-0.5">{unitsModalProject.location} · {selectedProjectUnits.length} total units</p>
+              </div>
+              <button 
+                onClick={() => setUnitsModalProject(null)} 
+                className="p-1.5 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Filters */}
+            <div className="p-4 border-b border-slate-100 bg-white flex flex-col sm:flex-row gap-3">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input 
+                  type="text" 
+                  value={unitsSearch} 
+                  onChange={(e) => setUnitsSearch(e.target.value)} 
+                  placeholder="Search units by name, facing, block..." 
+                  className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 focus:border-indigo-500 rounded-xl text-xs text-slate-800 outline-none transition" 
+                />
+                {unitsSearch && (
+                  <button onClick={() => setUnitsSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2">
+                    <X className="w-3.5 h-3.5 text-slate-400" />
+                  </button>
+                )}
+              </div>
+              {selectedProjectUnits.length > 0 && (
+                <button
+                  onClick={handleDownloadExcel}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-sm transition uppercase tracking-wider flex items-center justify-center space-x-2 shrink-0"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>Download Excel</span>
+                </button>
+              )}
+            </div>
+
+            {/* Body */}
+            <div className="flex-1 overflow-y-auto p-4 bg-slate-50/50">
+              {loadingUnits ? (
+                <div className="flex flex-col items-center justify-center py-20 text-slate-400 font-bold text-xs uppercase tracking-wider space-y-2">
+                  <Loader2 className="w-6 h-6 animate-spin text-indigo-500" />
+                  <span>Loading Units...</span>
+                </div>
+              ) : selectedProjectUnits.length === 0 ? (
+                <div className="p-12 text-center text-slate-400 font-bold bg-white rounded-xl border border-slate-200">
+                  <Building2 className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                  <span>No units added to this project yet.</span>
+                </div>
+              ) : (() => {
+                const filtered = selectedProjectUnits.filter((u) => {
+                  const query = unitsSearch.toLowerCase();
+                  const matchName = String(u.unit_name).toLowerCase().includes(query);
+                  const matchFacing = String(u.facing || "").toLowerCase().includes(query);
+                  const matchTower = String(u.tower || "").toLowerCase().includes(query);
+                  const matchStatus = String(u.status || "").toLowerCase().includes(query);
+                  return matchName || matchFacing || matchTower || matchStatus;
+                });
+
+                if (filtered.length === 0) {
+                  return (
+                    <div className="p-12 text-center text-slate-400 font-bold bg-white rounded-xl border border-slate-200">
+                      <span>No units match your search.</span>
+                    </div>
+                  );
+                }
+
+                return (
+                  <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-sm">
+                    <table className="w-full text-left text-xs font-semibold text-slate-500 border-collapse">
+                      <thead>
+                        <tr className="bg-slate-50/50 border-b border-slate-200 text-[10px] text-slate-400 uppercase tracking-wider">
+                          <th className="p-3">Unit / Plot</th>
+                          <th className="p-3">Block / Tower</th>
+                          <th className="p-3">Floor</th>
+                          <th className="p-3">Facing</th>
+                          <th className="p-3">Area (Sqft)</th>
+                          <th className="p-3">Other Details</th>
+                          <th className="p-3 text-right">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {filtered.map((u) => {
+                          const statusColors: Record<string, string> = {
+                            available: "bg-emerald-50 text-emerald-600 border border-emerald-200",
+                            booked: "bg-amber-50 text-amber-600 border border-amber-200",
+                            sold: "bg-red-50 text-red-600 border border-red-200",
+                            blocked: "bg-slate-100 text-slate-500 border border-slate-200",
+                            hold: "bg-amber-100/50 text-amber-800 border border-amber-200",
+                          };
+
+                          // Find any extra details (excluding known keys)
+                          const knownKeys = ["apartment", "unitname", "unitno", "flat", "plot", "name", "number", "block", "tower", "floorno", "floor", "facing", "sqft", "area", "size", "sft", "price", "cost", "value", "status", "availability"];
+                          const extraDetails = Object.entries(u.details || {})
+                            .filter(([k]) => !knownKeys.some(p => k.toLowerCase().replace(/[\s_-]/g, "").includes(p)))
+                            .map(([k, v]) => `${k}: ${v}`)
+                            .join(", ");
+
+                          return (
+                            <tr key={u.id} className="hover:bg-slate-50/30 transition text-slate-700">
+                              <td className="p-3 font-bold text-slate-900">{u.unit_name}</td>
+                              <td className="p-3">{u.tower || "—"}</td>
+                              <td className="p-3">{u.floor_number !== null ? u.floor_number : "—"}</td>
+                              <td className="p-3">{u.facing || "—"}</td>
+                              <td className="p-3">{u.carpet_area_sqft ? `${u.carpet_area_sqft} sqft` : "—"}</td>
+                              <td className="p-3 text-[10px] text-slate-400 font-medium max-w-xs truncate" title={extraDetails}>
+                                {extraDetails || "—"}
+                              </td>
+                              <td className="p-3 text-right">
+                                <span className={`px-2 py-0.5 rounded-full text-[9px] font-extrabold uppercase tracking-wide inline-block ${statusColors[u.status.toLowerCase()] || "bg-slate-50"}`}>
+                                  {u.status}
+                                </span>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

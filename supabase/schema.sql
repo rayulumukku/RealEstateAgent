@@ -24,7 +24,7 @@ DROP TYPE IF EXISTS unit_type CASCADE;
 DROP TYPE IF EXISTS verification_status CASCADE;
 
 -- 2. CREATE CUSTOM TYPES/ENUMS
-CREATE TYPE user_role AS ENUM ('agent', 'builder', 'admin');
+CREATE TYPE user_role AS ENUM ('agent', 'builder', 'super_builder', 'admin', 'super_admin', 'verification', 'operations');
 CREATE TYPE lead_status AS ENUM ('new', 'interested', 'site_visit', 'negotiation', 'closed', 'lost');
 CREATE TYPE unit_status AS ENUM ('available', 'booked', 'sold');
 CREATE TYPE unit_type AS ENUM ('apartment', 'villa', 'plot', 'commercial');
@@ -44,9 +44,11 @@ CREATE TABLE profiles (
   status verification_status DEFAULT 'pending'::verification_status NOT NULL,
   cp_id VARCHAR(50) UNIQUE,
   points INTEGER DEFAULT 0 NOT NULL,
+  credits INTEGER DEFAULT 0 NOT NULL,
   referrals_count INTEGER DEFAULT 0 NOT NULL,
   rejection_reason TEXT,
   location VARCHAR(100) DEFAULT 'Hyderabad',
+  parent_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );
 
@@ -173,6 +175,17 @@ CREATE TABLE campaigns (
   sent_count INTEGER DEFAULT 0 NOT NULL,
   read_rate FLOAT DEFAULT 0.0 NOT NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
+);
+
+-- Sub-Builder Association Requests Table
+CREATE TABLE sub_builder_requests (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  super_builder_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
+  builder_phone VARCHAR(20) NOT NULL,
+  builder_name VARCHAR(100) NOT NULL,
+  status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected')) NOT NULL,
+  created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL,
+  UNIQUE(super_builder_id, builder_phone)
 );
 
 -- 4. SEED SAMPLE DEMO DATA

@@ -84,17 +84,51 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized. Super Builder access required." }, { status: 403 });
   }
 
-  const { data: shares, error } = await supabaseAdmin
-    .from("project_shares")
-    .select("*, projects(name, city, location), profiles!project_shares_builder_id_fkey(name, phone, agency_name)")
-    .eq("shared_by", session.sub)
-    .order("created_at", { ascending: false });
+  let sharesList: any[] = [];
+  try {
+    const { data: sharesData, error } = await supabaseAdmin
+      .from("project_shares")
+      .select("id, project_id, builder_id, status, created_at")
+      .eq("shared_by", session.sub)
+      .eq("status", "active")
+      .order("created_at", { ascending: false });
 
-  if (error) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    if (error) {
+      console.warn("Could not load project_shares:", error.message);
+    } else if (sharesData && sharesData.length > 0) {
+      const projectIds = sharesData.map((s) => s.project_id);
+      const builderIds = sharesData.map((s) => s.builder_id);
+
+      const [projectsRes, profilesRes] = await Promise.all([
+        supabaseAdmin.from("projects").select("id, name, location").in("id", projectIds),
+        supabaseAdmin.from("profiles").select("id, name, phone, agency_name").in("id", builderIds)
+      ]);
+
+      const projectsMap = new Map(projectsRes.data?.map((p: any) => [p.id, p]) || []);
+      const profilesMap = new Map(profilesRes.data?.map((p: any) => [p.id, p]) || []);
+
+      sharesList = sharesData.map((s) => {
+        const proj = projectsMap.get(s.project_id) || {};
+        const builder = profilesMap.get(s.builder_id) || {};
+        return {
+          ...s,
+          projects: {
+            name: proj.name || "Project",
+            location: proj.location || ""
+          },
+          profiles: {
+            name: builder.name || "Builder",
+            phone: builder.phone || "",
+            agency_name: builder.agency_name || ""
+          }
+        };
+      });
+    }
+  } catch (e: any) {
+    console.warn("Failed to fetch project shares safely:", e.message);
   }
 
-  return NextResponse.json({ shares: shares || [] });
+  return NextResponse.json({ shares: sharesList });
 }
 
 // DELETE /api/super-builder/share — remove a builder from a shared project

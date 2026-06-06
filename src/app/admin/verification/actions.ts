@@ -122,3 +122,103 @@ export async function rejectAgentAction(id: string, phone: string, reason: strin
     return { success: false, error: err.message };
   }
 }
+
+export async function toggleReraApprovalAction(profileId: string, isApproved: boolean) {
+  try {
+    const { error } = await supabase
+      .from("profiles")
+      .update({ is_rera_approved: isApproved })
+      .eq("id", profileId);
+
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    console.error("Error in toggleReraApprovalAction:", err);
+    return { success: false, error: err.message };
+  }
+}
+
+export async function updateBuilderCreditsAction(builderId: string, credits: number) {
+  try {
+    const { error } = await supabase
+      .from("profiles")
+      .update({ credits: credits })
+      .eq("id", builderId);
+
+    if (error) throw error;
+    return { success: true };
+  } catch (err: any) {
+    console.error("Error in updateBuilderCreditsAction server action:", err);
+    return { success: false, error: err.message };
+  }
+}
+
+export async function getPendingLinkRequests() {
+  try {
+    const { data, error } = await supabase
+      .from("sub_builder_requests")
+      .select("*, super_builder:profiles!super_builder_id(name, agency_name)")
+      .eq("status", "pending")
+      .order("created_at", { ascending: false });
+
+    if (error) throw error;
+    return { success: true, requests: data || [] };
+  } catch (err: any) {
+    console.error("Error in getPendingLinkRequests:", err);
+    return { success: false, error: err.message || "Failed to load link requests", requests: [] };
+  }
+}
+
+export async function handleLinkRequestAction(requestId: string, approve: boolean) {
+  try {
+    if (approve) {
+      // Fetch request details
+      const { data: req, error: fetchErr } = await supabase
+        .from("sub_builder_requests")
+        .select("*")
+        .eq("id", requestId)
+        .single();
+
+      if (fetchErr || !req) throw new Error("Link request not found");
+
+      // Find target builder profile by phone
+      const { data: builder, error: builderErr } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("phone", req.builder_phone)
+        .single();
+
+      if (builderErr || !builder) throw new Error("Target builder account not found by phone number.");
+
+      // Link builder to the parent Super Builder
+      const { error: updateProfileErr } = await supabase
+        .from("profiles")
+        .update({ parent_id: req.super_builder_id })
+        .eq("id", builder.id);
+
+      if (updateProfileErr) throw updateProfileErr;
+
+      // Update request status to approved
+      const { error: updateReqErr } = await supabase
+        .from("sub_builder_requests")
+        .update({ status: "approved" })
+        .eq("id", requestId);
+
+      if (updateReqErr) throw updateReqErr;
+    } else {
+      // Update request status to rejected
+      const { error: updateReqErr } = await supabase
+        .from("sub_builder_requests")
+        .update({ status: "rejected" })
+        .eq("id", requestId);
+
+      if (updateReqErr) throw updateReqErr;
+    }
+
+    return { success: true };
+  } catch (err: any) {
+    console.error("Error in handleLinkRequestAction server action:", err);
+    return { success: false, error: err.message || "Action failed" };
+  }
+}
+

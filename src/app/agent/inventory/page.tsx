@@ -1,94 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import { 
   Search, SlidersHorizontal, MapPin, Building, 
-  Download, ArrowRight, CheckCircle, Info 
+  Download, ArrowRight, CheckCircle, Info, Loader2
 } from "lucide-react";
-
-interface Project {
-  id: string;
-  name: string;
-  location: string;
-  builder: string;
-  price: string;
-  availableUnits: number;
-  type: "Plot" | "Villa" | "Apartment" | "Commercial";
-  isPremium: boolean;
-  
-  // Specific attributes based on model
-  roadWidth?: string; // plots
-  facing?: string; // plots / apartments
-  fencing?: boolean; // plots
-  pool?: boolean; // villas
-  builtUp?: string; // villas
-  smartHome?: boolean; // villas
-  balconyCount?: number; // apartments
-  tower?: string; // apartments
-  frontage?: string; // commercial
-  parking?: string; // commercial
-}
+import { getAgentInventoryProjects, DBProject } from "./actions";
 
 export default function InventorySearch() {
+  const [projects, setProjects] = useState<DBProject[]>([]);
+  const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState<"All" | "Plot" | "Villa" | "Apartment" | "Commercial">("All");
   const [filterFacing, setFilterFacing] = useState("");
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
-  const projects: Project[] = [
-    {
-      id: "skyline-heights",
-      name: "Skyline Heights",
-      location: "Kokapet",
-      builder: "Prestige Group",
-      price: "₹1.82 Cr Onwards",
-      availableUnits: 12,
-      type: "Apartment",
-      isPremium: true,
-      facing: "East",
-      tower: "Tower A",
-      balconyCount: 2
-    },
-    {
-      id: "green-meadows",
-      name: "Green Meadows Plots",
-      location: "Gachibowli",
-      builder: "GMR Infra",
-      price: "₹1.40 Cr Onwards",
-      availableUnits: 5,
-      type: "Plot",
-      isPremium: false,
-      roadWidth: "40 Feet",
-      facing: "East",
-      fencing: true
-    },
-    {
-      id: "luxury-haven",
-      name: "Prestige Villa Haven",
-      location: "Jubilee Hills",
-      builder: "Prestige Group",
-      price: "₹4.50 Cr Onwards",
-      availableUnits: 3,
-      type: "Villa",
-      isPremium: true,
-      pool: true,
-      builtUp: "4200 sqft",
-      smartHome: true
-    },
-    {
-      id: "hitech-square",
-      name: "Hitech Square Commercial",
-      location: "Hitech City",
-      builder: "L&T Realty",
-      price: "₹5.50 Cr Onwards",
-      availableUnits: 6,
-      type: "Commercial",
-      isPremium: false,
-      frontage: "60 Feet",
-      parking: "25 Bays"
-    }
-  ];
+  useEffect(() => {
+    getAgentInventoryProjects().then((data) => {
+      setProjects(data);
+      setLoading(false);
+    });
+  }, []);
 
   // Filters logic
   const filteredProjects = projects.filter(project => {
@@ -110,6 +43,14 @@ export default function InventorySearch() {
       alert(`Brochure for "${name}" downloaded! Saved in Vault.`);
     }, 1200);
   };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-8 h-8 animate-spin text-[#25d366]" />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 text-slate-800">

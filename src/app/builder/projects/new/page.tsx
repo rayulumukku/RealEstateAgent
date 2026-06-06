@@ -1,20 +1,27 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { 
   Building, Upload, FileSpreadsheet, Loader2, 
-  CheckCircle, Sparkles, X 
+  CheckCircle, Sparkles, X, Users, Check, MapPin
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { saveProjectAction } from "./actions";
+import { supabase } from "@/lib/supabase";
+import { HYDERABAD_LOCATIONS } from "@/lib/hyderabadLocations";
+import * as XLSX from "xlsx";
 
 interface ParsedUnit {
-  number: string;
-  config: string;
-  size: string;
-  price: string;
-  status: "AVAILABLE" | "HOLD" | "SOLD" | "BLOCKED";
+  unit_name: string;
+  status: string;
+  floor_number?: number | null;
+  tower?: string | null;
+  facing?: string | null;
+  carpet_area_sqft?: number | null;
+  price?: number | null;
+  bhk_type?: string | null;
+  details?: Record<string, any>;
 }
 
 export default function NewProject() {
@@ -32,10 +39,109 @@ export default function NewProject() {
   const [saving, setSaving] = useState(false);
   const router = useRouter();
 
+  // WhatsApp Broadcast Targets & Filters
+  const [recipientFilter, setRecipientFilter] = useState<"all" | "verified" | "rera">("all");
+  const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
+  const [locationSearch, setLocationSearch] = useState("");
+  const [showLocationDropdown, setShowLocationDropdown] = useState(false);
+  const [estimatedReach, setEstimatedReach] = useState(0);
+
+  useEffect(() => {
+    async function fetchEstimatedReach() {
+      try {
+        let query = supabase
+          .from("profiles")
+          .select("id", { count: "exact", head: true })
+          .eq("role", "agent");
+
+        if (recipientFilter === "verified") {
+          query = query.eq("status", "approved");
+        } else if (recipientFilter === "rera") {
+          query = query.eq("is_rera_approved", true);
+        }
+
+        if (selectedLocations.length > 0) {
+          query = query.in("location", selectedLocations);
+        }
+
+        const { count } = await query;
+        setEstimatedReach(count || 0);
+      } catch {
+        setEstimatedReach(0);
+      }
+    }
+    fetchEstimatedReach();
+  }, [recipientFilter, selectedLocations]);
+
+  const toggleLocation = (loc: string) => {
+    setSelectedLocations((prev) =>
+      prev.includes(loc) ? prev.filter((l) => l !== loc) : [...prev, loc]
+    );
+  };
+
+  const filteredLocations = HYDERABAD_LOCATIONS.filter((loc) =>
+    loc.toLowerCase().includes(locationSearch.toLowerCase())
+  );
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
       setFileName(selectedFile.name);
+
+      const reader = new FileReader();
+      reader.onload = (evt) => {
+        try {
+          const bstr = evt.target?.result;
+          const wb = XLSX.read(bstr, { type: "binary" });
+          const wsname = wb.SheetNames[0];
+          const ws = wb.Sheets[wsname];
+          const data = XLSX.utils.sheet_to_json(ws);
+          
+          // Map dynamic Excel columns to our database fields
+          const units = data.map((row: any) => {
+            // Fuzzy search keys
+            const getVal = (patterns: string[]) => {
+              const key = Object.keys(row).find(k => 
+                patterns.some(p => k.toLowerCase().replace(/[\s_-]/g, "").includes(p))
+              );
+              return key ? row[key] : null;
+            };
+
+            const unitName = getVal(["apartment", "unitname", "unitno", "flat", "plot", "name", "number"]) || "Unit";
+            const block = getVal(["block", "tower"]);
+            const floorNo = getVal(["floorno", "floor"]);
+            const facing = getVal(["facing"]);
+            const sqft = getVal(["sqft", "area", "size", "sft"]);
+            const price = getVal(["price", "cost", "value"]);
+            const statusRaw = getVal(["status", "availability"]) || "available";
+
+            // Normalize status to: available, booked, sold, blocked, hold
+            let status = "available";
+            const sLower = String(statusRaw).toLowerCase();
+            if (sLower.includes("book")) status = "booked";
+            else if (sLower.includes("sold") || sLower.includes("close")) status = "sold";
+            else if (sLower.includes("block")) status = "blocked";
+            else if (sLower.includes("hold")) status = "hold";
+
+            return {
+              unit_name: String(unitName),
+              status: status,
+              floor_number: floorNo ? parseInt(String(floorNo)) : null,
+              tower: block ? String(block) : null,
+              facing: facing ? String(facing) : null,
+              carpet_area_sqft: sqft ? parseInt(String(sqft)) : null,
+              price: price ? parseFloat(String(price)) : null,
+              details: row // Keep original row data
+            };
+          });
+
+          setParsedUnits(units);
+        } catch (err) {
+          console.error("Error parsing Excel:", err);
+          alert("Error parsing Excel file. Please make sure it's valid.");
+        }
+      };
+      reader.readAsBinaryString(selectedFile);
     }
   };
 
@@ -45,8 +151,17 @@ export default function NewProject() {
 
     setSaving(true);
     const phone = localStorage.getItem("agentsapp_logged_in_phone") || "";
-    // Save project with no units for now
-    const res = await saveProjectAction(phone, name, location, city, price, propType, []);
+    const res = await saveProjectAction(
+      phone, 
+      name, 
+      location, 
+      city, 
+      price, 
+      propType, 
+      parsedUnits,
+      recipientFilter,
+      selectedLocations.length > 0 ? selectedLocations : undefined
+    );
 
     if (res.ok) {
       router.push("/builder/dashboard");
@@ -137,6 +252,116 @@ export default function NewProject() {
                 </div>
               </div>
 
+              {/* WhatsApp Broadcast Target Filters */}
+              <div className="border-t border-slate-200 pt-4 space-y-4">
+                <div>
+                  <h4 className="text-xs font-bold text-slate-800 uppercase tracking-wider flex items-center space-x-1.5">
+                    <Sparkles className="w-4 h-4 text-[#25d366]" />
+                    <span>WhatsApp Launch Broadcast Filter</span>
+                  </h4>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Choose which agents will receive the automatic WhatsApp notification on project launch.</p>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5 col-span-2 sm:col-span-1">
+                    <label className="block uppercase tracking-wider text-[10px]">Verification Filter</label>
+                    <select 
+                      value={recipientFilter}
+                      onChange={(e) => setRecipientFilter(e.target.value as any)}
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-[#25d366] rounded-xl py-2.5 px-3 text-slate-850 outline-none text-xs font-semibold transition"
+                    >
+                      <option value="all">To All Agents</option>
+                      <option value="verified">Only Verified Agents</option>
+                      <option value="rera">RERA Approved Agents</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="block uppercase tracking-wider text-[10px]">Filter by Location (Hyderabad Areas)</label>
+                  
+                  {/* Selected Locations Tags */}
+                  {selectedLocations.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 mb-2">
+                      {selectedLocations.map((loc) => (
+                        <span key={loc} className="inline-flex items-center space-x-1 px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-bold">
+                          <MapPin className="w-3.5 h-3.5 text-indigo-500 mr-0.5" />
+                          <span>{loc}</span>
+                          <button 
+                            type="button" 
+                            onClick={() => toggleLocation(loc)}
+                            className="text-indigo-400 hover:text-indigo-650 ml-1"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </span>
+                      ))}
+                      <button 
+                        type="button"
+                        onClick={() => setSelectedLocations([])}
+                        className="text-[9px] text-red-550 hover:text-red-700 font-bold uppercase tracking-wider px-2 py-1"
+                      >
+                        Clear All
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Location Input & Dropdown */}
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={locationSearch}
+                      onChange={(e) => { setLocationSearch(e.target.value); setShowLocationDropdown(true); }}
+                      onFocus={() => setShowLocationDropdown(true)}
+                      placeholder="Search area... (e.g. Madhapur, Gachibowli, Kokapet)"
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-[#25d366] rounded-xl py-2.5 px-3 text-slate-800 outline-none text-xs font-medium transition"
+                    />
+                    {showLocationDropdown && (
+                      <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg max-h-48 overflow-y-auto">
+                        {filteredLocations.length === 0 ? (
+                          <div className="p-3 text-xs text-slate-400">No areas found</div>
+                        ) : (
+                          filteredLocations.map((loc) => (
+                            <button
+                              key={loc}
+                              type="button"
+                              onClick={() => { toggleLocation(loc); setLocationSearch(""); }}
+                              className={`w-full text-left px-3 py-2 text-xs font-medium hover:bg-slate-50 transition flex items-center justify-between ${
+                                selectedLocations.includes(loc) ? "bg-indigo-50 text-indigo-700" : "text-slate-700"
+                              }`}
+                            >
+                              <span className="flex items-center space-x-2">
+                                <MapPin className="w-3 h-3 text-slate-400" />
+                                <span>{loc}</span>
+                              </span>
+                              {selectedLocations.includes(loc) && (
+                                <Check className="w-3.5 h-3.5 text-indigo-600" />
+                              )}
+                            </button>
+                          ))
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setShowLocationDropdown(false)}
+                          className="w-full text-center py-1.5 text-[10px] text-slate-400 font-bold uppercase tracking-wider border-t border-slate-100 hover:bg-slate-50"
+                        >
+                          Close
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Estimated Reach Display */}
+                <div className="flex items-center space-x-2 p-2.5 bg-emerald-50 border border-emerald-200 rounded-xl">
+                  <Users className="w-4 h-4 text-emerald-600" />
+                  <span className="text-xs font-bold text-emerald-700">
+                    Estimated Reach: {estimatedReach} agent{estimatedReach !== 1 ? "s" : ""}
+                    {selectedLocations.length > 0 ? ` in ${selectedLocations.length} area${selectedLocations.length !== 1 ? "s" : ""}` : " (all areas)"}
+                  </span>
+                </div>
+              </div>
+
               {/* Upload area */}
               <div className="space-y-1.5 pt-2">
                 <label className="block uppercase tracking-wider text-[10px]">Excel Spreadsheet Upload</label>
@@ -153,6 +378,12 @@ export default function NewProject() {
                   </div>
                   <div className="text-[8px] text-slate-500 mt-1">Accepts Excel (.xlsx), CSV up to 8MB</div>
                 </div>
+                {parsedUnits.length > 0 && (
+                  <div className="mt-2 flex items-center space-x-1.5 p-2.5 bg-indigo-50 border border-indigo-200 rounded-xl text-indigo-700">
+                    <CheckCircle className="w-4 h-4 text-indigo-500 shrink-0" />
+                    <span className="text-[10px] font-bold">Successfully parsed {parsedUnits.length} inventory units/plots from Excel!</span>
+                  </div>
+                )}
               </div>
 
               <div className="pt-2 flex justify-end gap-2 text-sm font-bold">

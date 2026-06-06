@@ -8,6 +8,7 @@ import {
   Briefcase, RefreshCw, X, ChevronRight, MapPin, Phone
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
+import { updateBuilderCreditsAction, getPendingLinkRequests, handleLinkRequestAction } from "@/app/admin/verification/actions";
 
 interface Profile {
   id: string;
@@ -19,6 +20,12 @@ interface Profile {
   location: string;
   points: number;
   created_at: string;
+  credits?: number;
+  parent_id?: string | null;
+  parent?: {
+    name: string;
+    agency_name: string;
+  } | null;
 }
 
 interface Project {
@@ -46,7 +53,7 @@ interface Lead {
   agent_name?: string;
 }
 
-type ActiveTab = "projects" | "agents" | "builders" | "leads" | "pending";
+type ActiveTab = "projects" | "agents" | "builders" | "leads" | "pending" | "builder_requests";
 
 export default function AdminDashboard() {
   const [loading, setLoading] = useState(true);
@@ -55,6 +62,7 @@ export default function AdminDashboard() {
   const [pendingProfiles, setPendingProfiles] = useState<Profile[]>([]);
   const [leads, setLeads] = useState<Lead[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
+  const [linkRequests, setLinkRequests] = useState<any[]>([]);
   const [activeTab, setActiveTab] = useState<ActiveTab>("projects");
 
   // Agent detail view
@@ -66,6 +74,15 @@ export default function AdminDashboard() {
   const [selectedBuilder, setSelectedBuilder] = useState<Profile | null>(null);
   const [builderProjects, setBuilderProjects] = useState<Project[]>([]);
 
+  const [updatingCredits, setUpdatingCredits] = useState(false);
+  const [creditsInput, setCreditsInput] = useState<string>("0");
+
+  useEffect(() => {
+    if (selectedBuilder) {
+      setCreditsInput(String(selectedBuilder.credits || 0));
+    }
+  }, [selectedBuilder]);
+
   async function loadData() {
     setLoading(true);
     try {
@@ -75,9 +92,26 @@ export default function AdminDashboard() {
         .order("created_at", { ascending: false });
 
       if (profiles) {
-        setAgents(profiles.filter((p: Profile) => p.role === "agent"));
-        setBuilders(profiles.filter((p: Profile) => p.role === "builder"));
-        setPendingProfiles(profiles.filter((p: Profile) => p.status === "pending"));
+        // Resolve parent references in-memory
+        const profilesWithParent = profiles.map((p: any) => {
+          if (p.parent_id) {
+            const parentProfile = profiles.find((parent: any) => parent.id === p.parent_id);
+            if (parentProfile) {
+              return {
+                ...p,
+                parent: {
+                  name: parentProfile.name,
+                  agency_name: parentProfile.agency_name
+                }
+              };
+            }
+          }
+          return p;
+        });
+
+        setAgents(profilesWithParent.filter((p: Profile) => p.role === "agent"));
+        setBuilders(profilesWithParent.filter((p: Profile) => p.role === "builder"));
+        setPendingProfiles(profilesWithParent.filter((p: Profile) => p.status === "pending"));
       }
 
       const { data: leadsData } = await supabase
@@ -103,6 +137,11 @@ export default function AdminDashboard() {
           ...p,
           developer_name: p.profiles?.name || "Unknown Builder"
         })));
+      }
+
+      const linkRes = await getPendingLinkRequests();
+      if (linkRes.success && linkRes.requests) {
+        setLinkRequests(linkRes.requests);
       }
     } catch (err) {
       console.error("Error loading admin data:", err);
@@ -153,6 +192,7 @@ export default function AdminDashboard() {
     { key: "builders", label: "Builders", count: builders.length, icon: Building, color: "indigo" },
     { key: "agents", label: "Registered Agents", count: agents.length, icon: Users, color: "emerald" },
     { key: "pending", label: "Pending Verification", count: pendingProfiles.length, icon: ShieldAlert, color: "red" },
+    { key: "builder_requests", label: "Builder Link Requests", count: linkRequests.length, icon: ShieldAlert, color: "amber" },
   ];
 
   return (
@@ -307,7 +347,7 @@ export default function AdminDashboard() {
         {activeTab === "builders" && (
           <div>
             <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">
-              Builders ({builders.length})
+              Builders ({builders.length}) — Click on a builder to manage credits & projects
             </h3>
             <div className="space-y-3 max-h-[500px] overflow-y-auto">
               {builders.length === 0 && !loading && (
@@ -323,7 +363,14 @@ export default function AdminDashboard() {
                   >
                     <div className="flex justify-between items-center">
                       <div>
-                        <div className="font-extrabold text-slate-900">{builder.name}</div>
+                        <div className="font-extrabold text-slate-900 flex items-center gap-1.5 flex-wrap">
+                          <span>{builder.name}</span>
+                          {builder.parent && (
+                            <span className="px-2 py-0.5 bg-purple-50 text-purple-650 border border-purple-200 rounded text-[9px] font-extrabold">
+                              Sub-builder of {builder.parent.agency_name || builder.parent.name}
+                            </span>
+                          )}
+                        </div>
                         <div className="text-[10px] text-slate-500 mt-0.5">
                           {builder.agency_name || "Builder"} · {builder.phone}
                         </div>
@@ -335,6 +382,10 @@ export default function AdminDashboard() {
                         )}
                       </div>
                       <div className="text-right flex items-center space-x-3">
+                        <div className="bg-indigo-50 border border-indigo-100 rounded-lg px-2.5 py-1 text-indigo-700 text-center min-w-[70px]">
+                          <div className="text-[8px] uppercase font-bold text-indigo-400 tracking-wider">Credits</div>
+                          <div className="font-extrabold text-sm leading-tight">{builder.credits ?? 0}</div>
+                        </div>
                         <div>
                           <div className="text-[9px] text-slate-400">Projects</div>
                           <div className="font-extrabold text-slate-900">{builderProjectCount}</div>
@@ -429,6 +480,75 @@ export default function AdminDashboard() {
                         Review →
                       </Link>
                     </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* BUILDER LINK REQUESTS TAB */}
+        {activeTab === "builder_requests" && (
+          <div>
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4">
+              Pending Builder Link Requests ({linkRequests.length})
+            </h3>
+            {linkRequests.length === 0 && !loading && (
+              <div className="text-center text-slate-400 text-xs py-8">No pending builder link requests.</div>
+            )}
+            <div className="space-y-3 max-h-[500px] overflow-y-auto">
+              {linkRequests.map((req) => (
+                <div key={req.id} className="p-5 bg-slate-50 rounded-xl border border-slate-200 text-xs font-semibold hover:border-amber-300 transition flex flex-col md:flex-row md:items-center justify-between gap-4">
+                  <div>
+                    <div className="flex items-center space-x-2">
+                      <span className="font-extrabold text-sm text-slate-900">{req.builder_name}</span>
+                      <span className="text-[10px] text-slate-500 font-bold bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5">{req.builder_phone}</span>
+                    </div>
+                    <div className="text-[11px] text-slate-500 mt-1 leading-relaxed">
+                      Requested by: <span className="font-bold text-slate-800">{req.super_builder?.name || "Super Builder"}</span>
+                      {req.super_builder?.agency_name && <span className="text-slate-400"> ({req.super_builder.agency_name})</span>}
+                    </div>
+                    <div className="text-[9px] text-slate-400 mt-1.5">Submitted {timeAgo(req.created_at)}</div>
+                  </div>
+                  
+                  <div className="flex items-center space-x-2 shrink-0">
+                    <button
+                      onClick={async () => {
+                        if (!confirm(`Approve linking ${req.builder_name} to ${req.super_builder?.name || 'Super Builder'}?`)) return;
+                        setLoading(true);
+                        const res = await handleLinkRequestAction(req.id, true);
+                        if (res.success) {
+                          alert("Link request approved successfully!");
+                          await loadData();
+                        } else {
+                          alert("Error: " + res.error);
+                          setLoading(false);
+                        }
+                      }}
+                      className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl flex items-center space-x-1 transition shadow-sm cursor-pointer"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Approve Link</span>
+                    </button>
+                    
+                    <button
+                      onClick={async () => {
+                        if (!confirm(`Reject linking ${req.builder_name} to ${req.super_builder?.name || 'Super Builder'}?`)) return;
+                        setLoading(true);
+                        const res = await handleLinkRequestAction(req.id, false);
+                        if (res.success) {
+                          alert("Link request rejected.");
+                          await loadData();
+                        } else {
+                          alert("Error: " + res.error);
+                          setLoading(false);
+                        }
+                      }}
+                      className="px-3.5 py-2 bg-red-50 hover:bg-red-100 text-red-650 font-bold text-xs rounded-xl border border-red-200 flex items-center space-x-1 transition cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                      <span>Reject</span>
+                    </button>
                   </div>
                 </div>
               ))}
@@ -533,7 +653,14 @@ export default function AdminDashboard() {
           <div className="w-full max-w-2xl bg-white rounded-2xl border border-slate-200 shadow-2xl overflow-hidden">
             <div className="p-6 border-b border-slate-200 flex justify-between items-start">
               <div>
-                <h2 className="text-lg font-extrabold text-slate-900">{selectedBuilder.name}</h2>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h2 className="text-lg font-extrabold text-slate-900">{selectedBuilder.name}</h2>
+                  {selectedBuilder.parent && (
+                    <span className="px-2.5 py-0.5 bg-purple-50 text-purple-650 border border-purple-200 rounded text-[10px] font-extrabold">
+                      Sub-builder of {selectedBuilder.parent.agency_name || selectedBuilder.parent.name}
+                    </span>
+                  )}
+                </div>
                 <div className="text-xs text-slate-500 mt-1 space-y-0.5">
                   <div className="flex items-center space-x-1">
                     <Phone className="w-3 h-3" />
@@ -561,6 +688,69 @@ export default function AdminDashboard() {
               >
                 <X className="w-5 h-5 text-slate-400" />
               </button>
+            </div>
+
+            {/* Builder Credits Settings Section */}
+            <div className="p-6 border-b border-slate-100 bg-indigo-50/30 space-y-3">
+              <div className="flex justify-between items-center">
+                <span className="text-xs uppercase font-extrabold text-indigo-900 tracking-wider">Builder Credits Administration</span>
+                <span className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-lg">
+                  Current: {selectedBuilder.credits || 0} Credits
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input 
+                  type="number"
+                  min="0"
+                  value={creditsInput}
+                  onChange={(e) => setCreditsInput(e.target.value)}
+                  placeholder="Set credits"
+                  className="w-32 bg-white border border-slate-200 focus:border-indigo-500 rounded-xl py-2.5 px-3 text-xs font-semibold text-slate-800 outline-none transition"
+                />
+                <button 
+                  type="button"
+                  onClick={() => {
+                    const val = Math.max(0, (parseInt(creditsInput) || 0) + 100);
+                    setCreditsInput(String(val));
+                  }}
+                  className="px-2.5 py-2.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[10px] font-bold transition"
+                >
+                  +100
+                </button>
+                <button 
+                  type="button"
+                  onClick={() => {
+                    const val = Math.max(0, (parseInt(creditsInput) || 0) - 100);
+                    setCreditsInput(String(val));
+                  }}
+                  className="px-2.5 py-2.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[10px] font-bold transition"
+                >
+                  -100
+                </button>
+                <button
+                  type="button"
+                  disabled={updatingCredits}
+                  onClick={async () => {
+                    setUpdatingCredits(true);
+                    const creditsVal = parseInt(creditsInput) || 0;
+                    const res = await updateBuilderCreditsAction(selectedBuilder.id, creditsVal);
+
+                    setUpdatingCredits(false);
+                    if (res.success) {
+                      // Update local states
+                      setBuilders(prev => prev.map(b => b.id === selectedBuilder.id ? { ...b, credits: creditsVal } : b));
+                      setSelectedBuilder(prev => prev ? { ...prev, credits: creditsVal } : null);
+                      alert("Credits updated successfully!");
+                    } else {
+                      alert("Failed to update credits: " + res.error);
+                    }
+                  }}
+                  className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-750 text-white rounded-xl text-xs font-bold transition disabled:opacity-70 flex items-center space-x-1.5"
+                >
+                  {updatingCredits && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  <span>Update Credits</span>
+                </button>
+              </div>
             </div>
 
             <div className="p-6 max-h-[400px] overflow-y-auto">

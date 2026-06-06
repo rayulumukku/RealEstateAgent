@@ -20,7 +20,7 @@ export default function AgentBottomNav() {
     { name: "Home", href: "/agent/dashboard", icon: Home },
     { name: "Leads", href: "/agent/pipeline", icon: Users },
     { name: "Inventory", href: "/agent/inventory", icon: Briefcase },
-    { name: "Events", href: "/agent/launches", icon: Calendar },
+    { name: "Events", href: "/agent/invitations", icon: Calendar },
     { name: "Rewards", href: "/agent/rewards", icon: Award },
     { name: "Profile", href: "/agent/profile", icon: User },
   ];

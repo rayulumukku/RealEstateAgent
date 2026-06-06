@@ -42,6 +42,19 @@ export async function GET() {
     return NextResponse.json({ profile: null, error: "Could not load profile." }, { status: 404 });
   }
 
+  // Resolve parent Super Builder credits if sub-builder
+  if (profile.parent_id) {
+    const { data: parentProfile } = await supabaseAdmin
+      .from("profiles")
+      .select("credits")
+      .eq("id", profile.parent_id)
+      .maybeSingle();
+
+    if (parentProfile) {
+      profile.credits = parentProfile.credits;
+    }
+  }
+
   return NextResponse.json({ profile });
 }
 

@@ -5,7 +5,7 @@ import {
   Check, X, FileText, ShieldAlert, 
   ArrowRight, ShieldCheck, Eye, Loader2, Award, Upload, Download, ExternalLink
 } from "lucide-react";
-import { getVerificationRequests, approveAgentAction, rejectAgentAction, requestDocsAction } from "./actions";
+import { getVerificationRequests, approveAgentAction, rejectAgentAction, requestDocsAction, toggleReraApprovalAction, updateBuilderCreditsAction } from "./actions";
 
 interface AgentRequest {
   id: string;
@@ -14,6 +14,7 @@ interface AgentRequest {
   phone: string;
   email: string;
   rera: string;
+  isReraApproved?: boolean;
   role: string;
   status: "Pending" | "Docs Required" | "Docs Uploaded" | "Approved" | "Rejected";
   rejectionReason?: string;
@@ -21,6 +22,7 @@ interface AgentRequest {
   referredBy?: string | null;
   uploadedDocs: { doc_type: string; file_name: string; file_url: string; uploaded_at: string }[];
   builderKyc?: { project_name: string; location: string; city: string; price_estimate: string; company_details: string; brochure_url: string; brochure_file_name: string } | null;
+  credits?: number;
 }
 
 export default function VerificationQueue() {
@@ -31,6 +33,17 @@ export default function VerificationQueue() {
   const [showRejectModal, setShowRejectModal] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [approveSuccessId, setApproveSuccessId] = useState<string | null>(null);
+
+  const [creditsInput, setCreditsInput] = useState<string>("0");
+  const [updatingCredits, setUpdatingCredits] = useState(false);
+
+  useEffect(() => {
+    if (selectedRequest) {
+      setCreditsInput(String(selectedRequest.credits || 0));
+    } else {
+      setCreditsInput("0");
+    }
+  }, [selectedRequest]);
 
   async function loadRequests() {
     setLoading(true);
@@ -73,6 +86,7 @@ export default function VerificationQueue() {
             phone: p.phone,
             email: p.email || "No Email",
             rera: p.rera_number || "N/A",
+            isReraApproved: p.is_rera_approved || false,
             role: p.role,
             status: statusStr,
             rejectionReason: p.rejection_reason,
@@ -80,6 +94,7 @@ export default function VerificationQueue() {
             referredBy,
             uploadedDocs: agentDocs,
             builderKyc: builderKyc || null,
+            credits: p.credits || 0,
           };
         });
         setRequests(mapped);
@@ -95,8 +110,20 @@ export default function VerificationQueue() {
     loadRequests();
   }, []);
 
-  const tabs = ["Pending", "Docs Required", "Docs Uploaded", "Approved", "Rejected"];
-  const filteredRequests = requests.filter(r => r.status === activeTab);
+  const tabs = ["Pending", "Docs Required", "Docs Uploaded", "Approved", "RERA Approved", "Rejected"];
+  const filteredRequests = requests.filter(r => {
+    if (activeTab === "RERA Approved") {
+      return r.status === "Approved" && r.isReraApproved;
+    }
+    return r.status === activeTab;
+  });
+
+  const getTabCount = (tab: string) => {
+    if (tab === "RERA Approved") {
+      return requests.filter(r => r.status === "Approved" && r.isReraApproved).length;
+    }
+    return requests.filter(r => r.status === tab).length;
+  };
 
   const handleRequestDocs = async (id: string) => {
     setLoading(true);
@@ -216,7 +243,7 @@ export default function VerificationQueue() {
               activeTab === tab ? "bg-[#25d366] text-white" : "text-slate-500 hover:text-slate-800"
             }`}
           >
-            {tab} ({requests.filter(r => r.status === tab).length})
+            {tab} ({getTabCount(tab)})
           </button>
         ))}
       </div>
@@ -251,9 +278,17 @@ export default function VerificationQueue() {
                     </div>
                   )}
                 </div>
-                <div className="text-right">
+                <div className="text-right flex flex-col items-end gap-1.5 shrink-0">
+                  {req.role === "builder" && (
+                    <span className="text-[9px] bg-indigo-50 border border-indigo-200 text-indigo-600 px-2 py-0.5 rounded font-bold">
+                      {req.credits ?? 0} Credits
+                    </span>
+                  )}
                   {req.status === "Approved" && (
                     <span className="text-[9px] bg-emerald-50 border border-emerald-200 text-emerald-600 px-2 py-0.5 rounded font-bold">{req.assignedCpId}</span>
+                  )}
+                  {req.status === "Approved" && req.isReraApproved && (
+                    <span className="text-[9px] bg-indigo-50 border border-indigo-200 text-indigo-650 px-2 py-0.5 rounded font-bold">RERA Approved</span>
                   )}
                   {req.status === "Docs Uploaded" && (
                     <span className="text-[9px] bg-blue-50 border border-blue-200 text-blue-600 px-2 py-0.5 rounded font-bold">Docs Ready</span>
@@ -287,11 +322,40 @@ export default function VerificationQueue() {
         <div className="lg:col-span-7">
           {selectedRequest ? (
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-md space-y-6">
-              <div>
-                <h3 className="text-lg font-bold text-slate-900">{selectedRequest.name}</h3>
-                <p className="text-xs text-slate-500 font-semibold mt-0.5">Agency: {selectedRequest.agency}</p>
-                <p className="text-xs text-slate-500 mt-0.5">Phone: {selectedRequest.phone} · Email: {selectedRequest.email}</p>
-                <p className="text-xs text-[#16c47f] font-bold mt-1 uppercase">RERA: {selectedRequest.rera}</p>
+              <div className="flex justify-between items-start">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-900">{selectedRequest.name}</h3>
+                  <p className="text-xs text-slate-500 font-semibold mt-0.5">Agency: {selectedRequest.agency}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Phone: {selectedRequest.phone} · Email: {selectedRequest.email}</p>
+                  <p className="text-xs text-[#16c47f] font-bold mt-1 uppercase">RERA: {selectedRequest.rera}</p>
+                </div>
+
+                {selectedRequest.status === "Approved" && (
+                  <div className="flex items-center space-x-2 bg-slate-50 p-2 rounded-xl border border-slate-200 shadow-sm shrink-0">
+                    <label className="flex items-center space-x-2 text-xs font-bold text-slate-700 cursor-pointer">
+                      <input 
+                        type="checkbox"
+                        checked={selectedRequest.isReraApproved || false}
+                        onChange={async (e) => {
+                          const checked = e.target.checked;
+                          // Optimistic update
+                          setRequests(prev => prev.map(r => r.id === selectedRequest.id ? { ...r, isReraApproved: checked } : r));
+                          setSelectedRequest(prev => prev ? { ...prev, isReraApproved: checked } : null);
+
+                          const res = await toggleReraApprovalAction(selectedRequest.id, checked);
+                          if (!res.success) {
+                            // Revert on failure
+                            setRequests(prev => prev.map(r => r.id === selectedRequest.id ? { ...r, isReraApproved: !checked } : r));
+                            setSelectedRequest(prev => prev ? { ...prev, isReraApproved: !checked } : null);
+                            alert("Failed to update RERA approval status: " + res.error);
+                          }
+                        }}
+                        className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-350 cursor-pointer"
+                      />
+                      <span>RERA Approved</span>
+                    </label>
+                  </div>
+                )}
               </div>
 
               {/* Uploaded Documents */}
@@ -350,6 +414,74 @@ export default function VerificationQueue() {
                         </a>
                       </div>
                     )}
+                  </div>
+                </div>
+              )}
+
+              {/* Builder Credits Administration */}
+              {selectedRequest.role === "builder" && (
+                <div className="p-4 bg-indigo-50/50 rounded-xl border border-indigo-200 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <span className="text-xs uppercase font-extrabold text-indigo-900 tracking-wider">Builder Credits Settings</span>
+                    <span className="text-xs font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2.5 py-1 rounded-lg">
+                      Current: {selectedRequest.credits || 0} Credits
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <input 
+                        type="number"
+                        min="0"
+                        value={creditsInput}
+                        onChange={(e) => setCreditsInput(e.target.value)}
+                        placeholder="Set credits (e.g. 50)"
+                        className="w-full bg-white border border-slate-205 focus:border-indigo-500 rounded-xl py-2 px-3 text-xs font-semibold text-slate-800 outline-none transition"
+                      />
+                    </div>
+                    <div className="flex gap-1.5 shrink-0">
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          const val = Math.max(0, (parseInt(creditsInput) || 0) + 100);
+                          setCreditsInput(String(val));
+                        }}
+                        className="px-2.5 py-2 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[10px] font-bold transition"
+                      >
+                        +100
+                      </button>
+                      <button 
+                        type="button"
+                        onClick={() => {
+                          const val = Math.max(0, (parseInt(creditsInput) || 0) - 100);
+                          setCreditsInput(String(val));
+                        }}
+                        className="px-2.5 py-2 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 rounded-lg text-[10px] font-bold transition"
+                      >
+                        -100
+                      </button>
+                      <button
+                        type="button"
+                        disabled={updatingCredits}
+                        onClick={async () => {
+                          setUpdatingCredits(true);
+                          const creditsVal = parseInt(creditsInput) || 0;
+                          const res = await updateBuilderCreditsAction(selectedRequest.id, creditsVal);
+                          setUpdatingCredits(false);
+                          if (res.success) {
+                            // Update local state
+                            setRequests(prev => prev.map(r => r.id === selectedRequest.id ? { ...r, credits: creditsVal } : r));
+                            setSelectedRequest(prev => prev ? { ...prev, credits: creditsVal } : null);
+                            alert("Credits updated successfully!");
+                          } else {
+                            alert("Failed to update credits: " + res.error);
+                          }
+                        }}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition disabled:opacity-70 flex items-center space-x-1"
+                      >
+                        {updatingCredits && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                        <span>Update Credits</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
