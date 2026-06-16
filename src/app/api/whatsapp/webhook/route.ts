@@ -188,11 +188,15 @@ export async function POST(req: NextRequest) {
       payload?.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.id ||
       null;
 
+    // Format phone number to match the database profile representation: "+91 98765 43210"
+    const last10Digits = fromPhoneRaw.slice(-10);
+    const formattedPhone = `+91 ${last10Digits.slice(0, 5)} ${last10Digits.slice(5)}`;
+
     // Audit-log the inbound message immediately. We don't know the
     // agent_id yet; the lookup happens further down.
     await logWhatsappMessage({
       direction: "inbound",
-      phone: fromPhoneRaw,
+      phone: formattedPhone, // Fix: use formattedPhone
       wamid,
       message_type: "text",
       content: textBody,
@@ -222,9 +226,7 @@ export async function POST(req: NextRequest) {
 
     const commandLower = commandText.toLowerCase();
 
-    // Format phone number to match the database profile representation: "+91 98765 43210"
-    const last10Digits = fromPhoneRaw.slice(-10);
-    const formattedPhone = `+91 ${last10Digits.slice(0, 5)} ${last10Digits.slice(5)}`;
+    // formattedPhone is already defined above
 
     // Outbound helper to send messages back via GallaBox WhatsApp API
     const sendOutboundReply = async (replyText: string) => {
@@ -237,7 +239,7 @@ export async function POST(req: NextRequest) {
       if (!apiKey || !apiSecret || !channelId || isFromSimulator) {
         await logWhatsappMessage({
           direction: "outbound",
-          phone: fromPhoneRaw,
+          phone: formattedPhone, // Fix: use formattedPhone so it matches history polls
           message_type: "text",
           content: replyText,
           source,
@@ -301,57 +303,95 @@ export async function POST(req: NextRequest) {
       .eq("phone", formattedPhone)
       .single();
 
-    if (!profile) {
-      // Check if they want to register
-      if (commandLower.startsWith("register") || commandLower.includes("register")) {
-        const match = commandText.match(/register\s+(.+)\s+agency\s+(.*)/i);
-        if (match) {
-          let regName = match[1].trim();
-          let regAgency = match[2].trim();
+    // Handle Registration Commands
+    if (commandLower.startsWith("register") || commandLower.includes("register")) {
+      const matchWithAll = commandText.match(/register\s+(.*?)\s+phone\s+(.*?)\s+agency\s+(.*?)\s+location\s+(.*?)\s+interested in\s+(.*)/i);
+      const matchWithPhone = commandText.match(/register\s+(.*?)\s+phone\s+(.*?)\s+agency\s+(.*)/i);
+      const matchWithoutPhone = commandText.match(/register\s+(.*?)\s+agency\s+(.*)/i);
+      
+      const match = matchWithAll || matchWithPhone || matchWithoutPhone;
 
-          // Strip square brackets if the user typed them literally
-          if (regName.startsWith("[") && regName.endsWith("]")) {
-            regName = regName.slice(1, -1).trim();
-          }
-          if (regAgency.startsWith("[") && regAgency.endsWith("]")) {
-            regAgency = regAgency.slice(1, -1).trim();
-          }
-          const generatedId = `CP-${Math.floor(1000 + Math.random() * 9000)}`;
+      if (match) {
+        let regName = match[1].trim();
+        let regPhone = matchWithAll || matchWithPhone ? match[2].trim() : formattedPhone;
+        let regAgency = matchWithAll ? match[3].trim() : matchWithPhone ? match[3].trim() : match[2].trim();
+        let regLocation = matchWithAll ? match[4].trim() : "";
+        let regInterested = matchWithAll ? match[5].trim() : "";
 
-          const { data: newProfile, error } = await supabase
+        // Strip square brackets if the user typed them literally
+        if (regName.startsWith("[") && regName.endsWith("]")) regName = regName.slice(1, -1).trim();
+        if (regAgency.startsWith("[") && regAgency.endsWith("]")) regAgency = regAgency.slice(1, -1).trim();
+        if (regPhone.startsWith("[") && regPhone.endsWith("]")) regPhone = regPhone.slice(1, -1).trim();
+        if (regLocation.startsWith("[") && regLocation.endsWith("]")) regLocation = regLocation.slice(1, -1).trim();
+        if (regInterested.startsWith("[") && regInterested.endsWith("]")) regInterested = regInterested.slice(1, -1).trim();
+
+        let interestedArr: string[] = [];
+        if (regInterested) {
+           interestedArr = regInterested.split(",").map(i => i.trim());
+        }
+
+        const cleanInputPhone = regPhone.replace(/\D/g, "");
+        const finalPhoneForDb = cleanInputPhone.length >= 10 
+          ? `+91 ${cleanInputPhone.slice(-10).slice(0, 5)} ${cleanInputPhone.slice(-10).slice(5)}` 
+          : formattedPhone;
+
+        let dbError = null;
+        let generatedId = profile?.cp_id || `CP-${Math.floor(1000 + Math.random() * 9000)}`;
+
+        if (profile) {
+          // UPDATE existing profile
+          const { error } = await supabase
+            .from("profiles")
+            .update({
+              phone: finalPhoneForDb,
+              name: regName,
+              agency_name: regAgency,
+              location: regLocation,
+              interested_properties: interestedArr
+            })
+            .eq("id", profile.id);
+          dbError = error;
+        } else {
+          // INSERT new profile
+          const { error } = await supabase
             .from("profiles")
             .insert([{
-              phone: formattedPhone,
+              phone: finalPhoneForDb,
               name: regName,
               agency_name: regAgency,
               role: "agent",
-              status: "approved", // Auto-approved for frictionless demo
+              status: "pending",
               cp_id: generatedId,
               points: 500,
-              referrals_count: 0
-            }])
-            .select()
-            .single();
-
-          if (error) {
-            console.error("Failed to register agent via WhatsApp:", error);
-            const replyErr = `🤖 Bot: ❌ Failed to register: ${error.message}`;
-            await sendOutboundReply(replyErr);
-            return NextResponse.json({ status: "error", reply: replyErr });
-          } else {
-            const replyOk = `🎉 *Registration Successful!*\n\n👤 Name: *${regName}*\n🏢 Agency: *${regAgency}*\n🆔 CP ID: *${generatedId}*\n💰 Welcome Reward: *+500 XP*\n\nYour agentsapp account is now live! Type *aa help* to see all commands.`;
-            await sendOutboundReply(replyOk);
-            return NextResponse.json({ status: "success", reply: replyOk });
-          }
-        } else {
-          const replyFormat = `🤖 *AgentsApp Onboarding*:\n\nTo register as a Channel Partner directly on WhatsApp, please reply in this format:\n\n_"aa Register [Your Name] agency [Agency Name]"_\n\n(Example: _"aa Register Amit Sharma agency Sunrise Realty"_ )`;
-          await sendOutboundReply(replyFormat);
-          return NextResponse.json({ status: "success", reply: replyFormat });
+              referrals_count: 0,
+              location: regLocation,
+              interested_properties: interestedArr
+            }]);
+          dbError = error;
         }
-      }
 
+        if (dbError) {
+          console.error("Failed to register agent via WhatsApp:", dbError);
+          const replyErr = `🤖 Bot: ❌ Failed to register/update: ${dbError.message}`;
+          await sendOutboundReply(replyErr);
+          return NextResponse.json({ status: "error", reply: replyErr });
+        } else {
+          const locText = regLocation ? `\n📍 Location: *${regLocation}*` : "";
+          const intText = regInterested ? `\n🏡 Interested: *${regInterested}*` : "";
+          const replyOk = `🎉 *Registration ${profile ? "Updated" : "Successful"}!*\n\n👤 Name: *${regName}*\n🏢 Agency: *${regAgency}*\n📞 Phone: *${finalPhoneForDb}*${locText}${intText}\n🆔 CP ID: *${generatedId}*\n💰 Welcome Reward: *+500 XP*\n\n⚠️ *Action Required:*\nPlease reply to this message with your *RERA Document, Aadhar, and PAN* to get verified.\n\nYour account is currently *pending approval* by an admin.`;
+          await sendOutboundReply(replyOk);
+          return NextResponse.json({ status: "success", reply: replyOk });
+        }
+      } else {
+        const replyFormat = `🤖 *AgentsApp Onboarding*:\n\nTo register as a Channel Partner directly on WhatsApp, please reply in this format:\n\n_"aa Register [Your Name] phone [Your Phone Number] agency [Agency Name] location [Your City] interested in [Property Types]"_`;
+        await sendOutboundReply(replyFormat);
+        return NextResponse.json({ status: "success", reply: replyFormat });
+      }
+    }
+
+    if (!profile) {
       // If not a registration command, ask them to register
-      const replyRegPrompt = `🤖 *Welcome to AgentsApp!*\n\nIt looks like your phone number is not registered yet as a Channel Partner.\n\nTo create your account instantly on WhatsApp, please reply with:\n\n_"aa Register [Your Name] agency [Your Agency Name]"_`;
+      const replyRegPrompt = `🤖 *Welcome to AgentsApp!*\n\nIt looks like your phone number is not registered yet as a Channel Partner.\n\nTo create your account instantly on WhatsApp, please reply with:\n\n_"aa Register [Your Name] phone [Your Phone Number] agency [Your Agency Name]"_`;
       await sendOutboundReply(replyRegPrompt);
       return NextResponse.json({ status: "success", reply: replyRegPrompt });
     }
@@ -401,20 +441,29 @@ export async function POST(req: NextRequest) {
         helpMsg = `🤖 *AgentsApp Agent Menu*\n\n` +
           `👋 Welcome *${profile.name}* (${profile.agency_name || "Agent"})!\n` +
           `🆔 CP ID: *${profile.cp_id || "Pending"}*\n\n` +
-          `Manage your CRM:\n\n` +
           `📋 *Leads*\n` +
           `1. _"aa Add [Name] looking for [BHK]"_ — add lead\n` +
           `2. _"aa My leads"_ — view all your leads\n` +
           `3. _"aa Search [Name]"_ — find a specific lead\n` +
           `4. _"aa [Name] site visit"_ — update lead status\n\n` +
           `⏰ *Reminders*\n` +
-          `5. _"aa Remind me to call [Name] time [date]"_ — set reminder\n\n` +
-          `🏢 *Inventory*\n` +
-          `6. _"aa Search 3BHK Kokapet"_ — search units\n` +
-          `7. _"aa brochure [project]"_ — get brochure PDF\n\n` +
+          `5. _"aa Remind me to call [Name] time [date]"_ — set reminder\n` +
+          `6. _"aa my reminders"_ — view pending reminders\n\n` +
+          `🏢 *Inventory & Projects*\n` +
+          `7. _"aa Search 3BHK Kokapet"_ — search units\n` +
+          `8. _"aa brochure [project]"_ — get brochure PDF\n` +
+          `9. _"aa my projects"_ — projects you follow\n\n` +
           `📅 *Events*\n` +
-          `8. _"aa launches"_ — upcoming events & meets\n` +
-          `9. _"aa webinars"_ — register for webinars\n\n` +
+          `10. _"aa launches"_ — upcoming events & meets\n` +
+          `11. _"aa webinars"_ — register for webinars\n` +
+          `12. _"aa my events"_ — your accepted RSVPs\n\n` +
+          `🏆 *Rewards*\n` +
+          `13. _"aa my points"_ — your XP balance & rank\n` +
+          `14. _"aa leaderboard"_ — top 10 agents\n` +
+          `15. _"aa my referrals"_ — agents you referred\n\n` +
+          `👤 *Profile*\n` +
+          `16. _"aa my profile"_ — your full profile details\n` +
+          `17. _"aa dashboard"_ — quick stats summary\n\n` +
           `👉 Prefix all commands with *aa*`;
       }
 
@@ -958,10 +1007,198 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "success", reply: replyMsg.trim() });
     }
 
+    // 15. MY POINTS / XP BALANCE
+    if (commandLower === "my points" || commandLower === "points" || commandLower === "xp" || commandLower === "my xp") {
+      const { data: allAgents } = await supabase
+        .from("profiles")
+        .select("name, points")
+        .eq("role", "agent")
+        .order("points", { ascending: false });
+
+      const myRank = (allAgents || []).findIndex(a => a.name === profile.name) + 1;
+
+      const replyMsg = `🏆 *Your Rewards Summary*\n\n` +
+        `👤 Name: *${profile.name}*\n` +
+        `🆔 CP ID: *${profile.cp_id || "Pending"}*\n` +
+        `⭐ XP Points: *${profile.points || 0} XP*\n` +
+        `🥇 Leaderboard Rank: *#${myRank || "N/A"}* of ${allAgents?.length || 0} agents\n\n` +
+        `👉 Type _"aa leaderboard"_ to see top agents.`;
+      await sendOutboundReply(replyMsg);
+      return NextResponse.json({ status: "success", reply: replyMsg });
+    }
+
+    // 16. LEADERBOARD
+    if (commandLower === "leaderboard" || commandLower === "top agents" || commandLower === "rankings") {
+      const { data: topAgents } = await supabase
+        .from("profiles")
+        .select("name, points, location")
+        .eq("role", "agent")
+        .order("points", { ascending: false })
+        .limit(10);
+
+      const medals = ["🥇", "🥈", "🥉"];
+      let replyMsg = `🏆 *Agent Leaderboard — Top 10*\n\n`;
+      (topAgents || []).forEach((a, idx) => {
+        const medal = medals[idx] || `${idx + 1}.`;
+        replyMsg += `${medal} *${a.name}* — ${a.points || 0} XP\n   📍 ${a.location || "Hyderabad"}\n\n`;
+      });
+      replyMsg += `👉 Type _"aa my points"_ to see your rank.`;
+      await sendOutboundReply(replyMsg);
+      return NextResponse.json({ status: "success", reply: replyMsg });
+    }
+
+    // 17. MY REFERRALS
+    if (commandLower === "my referrals" || commandLower === "referrals") {
+      const { data: referrals } = await supabase
+        .from("referrals")
+        .select("referred_name, referred_phone, status, points_awarded, date")
+        .eq("referrer_id", profile.id)
+        .order("date", { ascending: false });
+
+      if (!referrals || referrals.length === 0) {
+        const replyEmpty = `🤖 Bot: You haven't referred any agents yet.\n\n🔗 Your referral link:\n${process.env.NEXT_PUBLIC_BASE_URL || "https://agentsapp.online"}/?ref=${profile.cp_id || ""}\n\nShare this link to earn *+500 XP* per approved referral!`;
+        await sendOutboundReply(replyEmpty);
+        return NextResponse.json({ status: "success", reply: replyEmpty });
+      }
+
+      const approved = referrals.filter(r => r.status === "approved" || r.status === "active").length;
+      const pending = referrals.filter(r => r.status === "pending").length;
+      let replyMsg = `🤝 *Your Referrals* (${referrals.length} total)\n✅ Approved: ${approved} | ⏳ Pending: ${pending}\n\n`;
+      referrals.forEach((r, idx) => {
+        const statusEmoji = r.status === "approved" ? "✅" : r.status === "pending" ? "⏳" : "❌";
+        replyMsg += `${idx + 1}. ${statusEmoji} *${r.referred_name}*\n   📱 ${r.referred_phone}\n   🗓️ ${r.date} | 🎁 ${r.points_awarded > 0 ? `+${r.points_awarded} XP` : "Pending"}\n\n`;
+      });
+      await sendOutboundReply(replyMsg.trim());
+      return NextResponse.json({ status: "success", reply: replyMsg.trim() });
+    }
+
+    // 18. MY PROFILE
+    if (commandLower === "my profile" || commandLower === "profile" || commandLower === "my details") {
+      const statusEmoji = profile.status === "approved" ? "✅ Approved" : profile.status === "pending" ? "⏳ Pending Approval" : "❌ Rejected";
+      const replyMsg = `👤 *Your AgentsApp Profile*\n\n` +
+        `📛 Name: *${profile.name}*\n` +
+        `🏢 Agency: *${profile.agency_name || "N/A"}*\n` +
+        `📱 Phone: *${profile.phone}*\n` +
+        `📧 Email: *${profile.email || "N/A"}*\n` +
+        `🆔 CP ID: *${profile.cp_id || "Pending"}*\n` +
+        `📄 RERA No: *${profile.rera_number || "Not submitted"}*\n` +
+        `📍 Location: *${profile.location || "N/A"}*\n` +
+        `⭐ XP Points: *${profile.points || 0} XP*\n` +
+        `✔️ Status: *${statusEmoji}*`;
+      await sendOutboundReply(replyMsg);
+      return NextResponse.json({ status: "success", reply: replyMsg });
+    }
+
+    // 19. MY FOLLOWING PROJECTS
+    if (commandLower === "my projects" || commandLower === "following projects" || commandLower === "projects i follow") {
+      // agent_invitations links agents to events/projects via accepted status
+      const { data: invitations } = await supabase
+        .from("agent_invitations")
+        .select("*, events(title, location, date, description)")
+        .eq("agent_id", profile.id)
+        .eq("status", "accepted");
+
+      // Filter for project-type events (title starts with "New Project:")
+      const projectInvites = (invitations || []).filter(inv =>
+        inv.events?.title?.startsWith("New Project:")
+      );
+
+      if (projectInvites.length === 0) {
+        const replyEmpty = "🤖 Bot: You are not following any projects yet. Check your Invitations tab and tap 'Follow Project' to start tracking.";
+        await sendOutboundReply(replyEmpty);
+        return NextResponse.json({ status: "success", reply: replyEmpty });
+      }
+
+      let replyMsg = `🏢 *Projects You're Following* (${projectInvites.length})\n\n`;
+      projectInvites.forEach((inv, idx) => {
+        const title = inv.events?.title?.replace("New Project: ", "") || "Unknown";
+        replyMsg += `${idx + 1}. 🏗️ *${title}*\n   📍 ${inv.events?.location || "N/A"}\n\n`;
+      });
+      await sendOutboundReply(replyMsg.trim());
+      return NextResponse.json({ status: "success", reply: replyMsg.trim() });
+    }
+
+    // 20. MY EVENTS / RSVPs
+    if (commandLower === "my events" || commandLower === "my rsvps" || commandLower === "accepted events") {
+      const { data: invitations } = await supabase
+        .from("agent_invitations")
+        .select("*, events(title, location, date, description)")
+        .eq("agent_id", profile.id)
+        .eq("status", "accepted");
+
+      // Filter for non-project events (actual meets/launches/webinars)
+      const eventInvites = (invitations || []).filter(inv =>
+        !inv.events?.title?.startsWith("New Project:")
+      );
+
+      if (eventInvites.length === 0) {
+        const replyEmpty = "🤖 Bot: You haven't accepted any events yet. Type _\"aa launches\"_ to see upcoming events.";
+        await sendOutboundReply(replyEmpty);
+        return NextResponse.json({ status: "success", reply: replyEmpty });
+      }
+
+      let replyMsg = `📅 *Your Accepted Events* (${eventInvites.length})\n\n`;
+      eventInvites.forEach((inv, idx) => {
+        replyMsg += `${idx + 1}. ✅ *${inv.events?.title || "Event"}*\n   📅 ${inv.events?.date || "TBD"}\n   📍 ${inv.events?.location || "N/A"}\n\n`;
+      });
+      await sendOutboundReply(replyMsg.trim());
+      return NextResponse.json({ status: "success", reply: replyMsg.trim() });
+    }
+
+    // 21. MY REMINDERS
+    if (commandLower === "my reminders" || commandLower === "reminders") {
+      const { data: reminders } = await supabase
+        .from("reminders")
+        .select("title, scheduled_time, priority, is_completed")
+        .eq("agent_id", profile.id)
+        .eq("is_completed", false)
+        .order("scheduled_time", { ascending: true })
+        .limit(10);
+
+      if (!reminders || reminders.length === 0) {
+        const replyEmpty = "🤖 Bot: You have no pending reminders. Set one with:\n_\"aa Remind me to call Ravi time Tomorrow 10AM\"_";
+        await sendOutboundReply(replyEmpty);
+        return NextResponse.json({ status: "success", reply: replyEmpty });
+      }
+
+      const priorityEmoji: Record<string, string> = { high: "🔴", medium: "🟡", low: "🟢" };
+      let replyMsg = `⏰ *Your Pending Reminders* (${reminders.length})\n\n`;
+      reminders.forEach((r, idx) => {
+        const pe = priorityEmoji[r.priority] || "🔔";
+        replyMsg += `${idx + 1}. ${pe} *${r.title}*\n   🕐 ${r.scheduled_time}\n\n`;
+      });
+      await sendOutboundReply(replyMsg.trim());
+      return NextResponse.json({ status: "success", reply: replyMsg.trim() });
+    }
+
+    // 22. DASHBOARD QUICK STATS
+    if (commandLower === "dashboard" || commandLower === "summary" || commandLower === "my stats") {
+      const [leadsRes, remindersRes, eventsRes] = await Promise.all([
+        supabase.from("leads").select("id, status").eq("agent_id", profile.id),
+        supabase.from("reminders").select("id").eq("agent_id", profile.id).eq("is_completed", false),
+        supabase.from("agent_invitations").select("id").eq("agent_id", profile.id).eq("status", "accepted"),
+      ]);
+
+      const leads = leadsRes.data || [];
+      const hotLeads = leads.filter(l => ["interested", "site_visit", "negotiation"].includes(l.status)).length;
+      const replyMsg = `📊 *Your Dashboard Summary*\n\n` +
+        `👤 *${profile.name}* | CP ID: ${profile.cp_id || "Pending"}\n` +
+        `⭐ XP: *${profile.points || 0} pts*\n\n` +
+        `📋 *Leads*\n` +
+        `• Total: *${leads.length}*\n` +
+        `• Hot Leads: *${hotLeads}*\n\n` +
+        `⏰ *Pending Reminders:* ${remindersRes.data?.length || 0}\n` +
+        `📅 *Events Accepted:* ${eventsRes.data?.length || 0}\n\n` +
+        `👉 Type _"aa help"_ for all commands.`;
+      await sendOutboundReply(replyMsg);
+      return NextResponse.json({ status: "success", reply: replyMsg });
+    }
+
     // Default/Fallback help menu
     const helpMsg = `🤖 Bot: I didn't catch that command. Type *aa help* to see all available commands.`;
     await sendOutboundReply(helpMsg);
     return NextResponse.json({ status: "success", reply: helpMsg });
+
   } catch (err: any) {
     console.error("Error processing WhatsApp POST Webhook:", err);
     const replyErr = `🤖 Bot: ❌ Internal Webhook Error: ${err.message}`;

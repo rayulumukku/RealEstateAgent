@@ -24,6 +24,7 @@ export default function AgentLayout({
   const [status, setStatus] = useState<AgentStatus>("loading");
   const [uploadedDocs, setUploadedDocs] = useState<UploadedDoc[]>([]);
   const [uploading, setUploading] = useState<string | null>(null);
+  const [rejectionReason, setRejectionReason] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState("");
   const [uploadSuccess, setUploadSuccess] = useState("");
 
@@ -43,7 +44,10 @@ export default function AgentLayout({
         if (data.profile) {
           const s = data.profile.status;
           if (s === "approved") setStatus("approved");
-          else if (s === "rejected") setStatus("rejected");
+          else if (s === "rejected") {
+            setStatus("rejected");
+            setRejectionReason(data.profile.rejection_reason || null);
+          }
           else if (s === "docs_required") {
             setStatus("docs_required");
             loadDocs();
@@ -331,9 +335,16 @@ export default function AgentLayout({
           <p className="text-sm text-slate-500 leading-relaxed">
             Unfortunately, your agent registration has been rejected by the admin team. If you believe this is a mistake, please contact support.
           </p>
-          <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-semibold">
-            You cannot access the agent dashboard. Please contact the admin for more information.
-          </div>
+          {rejectionReason ? (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-left">
+              <h3 className="text-xs font-bold text-red-800 uppercase tracking-wider mb-1">Reason for Rejection</h3>
+              <p className="text-sm text-red-700 font-medium">{rejectionReason}</p>
+            </div>
+          ) : (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-xs text-red-700 font-semibold">
+              You cannot access the agent dashboard. Please contact the admin for more information.
+            </div>
+          )}
           <button
             onClick={() => performLogout()}
             className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition uppercase tracking-wider"

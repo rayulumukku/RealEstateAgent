@@ -16,6 +16,7 @@ export default function BuilderLayout({
 }) {
   const [status, setStatus] = useState<BuilderStatus>("loading");
   const [kycSubmitted, setKycSubmitted] = useState(false);
+  const [rejectionReason, setRejectionReason] = useState<string | null>(null);
 
   // KYC form fields
   const [projectName, setProjectName] = useState("");
@@ -40,7 +41,10 @@ export default function BuilderLayout({
         if (data.profile) {
           const s = data.profile.status;
           if (s === "approved") setStatus("approved");
-          else if (s === "rejected") setStatus("rejected");
+          else if (s === "rejected") {
+            setStatus("rejected");
+            setRejectionReason(data.profile.rejection_reason || null);
+          }
           else if (s === "docs_required") setStatus("docs_required");
           else if (s === "docs_uploaded") setStatus("docs_uploaded");
           else setStatus("pending");
@@ -231,6 +235,12 @@ export default function BuilderLayout({
           </div>
           <h1 className="text-xl font-extrabold text-slate-900">Application Rejected</h1>
           <p className="text-sm text-slate-500">Your builder application has been rejected. Please contact support for more info.</p>
+          {rejectionReason && (
+            <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-left">
+              <h3 className="text-xs font-bold text-red-800 uppercase tracking-wider mb-1">Reason for Rejection</h3>
+              <p className="text-sm text-red-700 font-medium">{rejectionReason}</p>
+            </div>
+          )}
           <button onClick={() => performLogout()} className="px-5 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl transition uppercase tracking-wider">Logout</button>
         </div>
       </div>

@@ -35,6 +35,7 @@ function LoginContent() {
   const [email, setEmail] = useState("");
   const [reraNumber, setReraNumber] = useState("");
   const [agentLocation, setAgentLocation] = useState("");
+  const [interestedProperties, setInterestedProperties] = useState<string[]>([]);
   const [reraUploaded, setReraUploaded] = useState(false);
   const [idUploaded, setIdUploaded] = useState(false);
   const [waVerified, setWaVerified] = useState(false);
@@ -249,8 +250,8 @@ function LoginContent() {
     e.preventDefault();
     setMessage("");
 
-    if (!fullName || !agencyName || !email || !reraNumber || !agentLocation || !reraUploaded || !idUploaded) {
-      setMessage("Please fill in all details including location and upload both documents.");
+    if (!fullName || !agencyName || !email || !reraNumber || !agentLocation || !reraUploaded || !idUploaded || interestedProperties.length === 0) {
+      setMessage("Please fill in all details including location, interested properties, and upload both documents.");
       return;
     }
 
@@ -263,6 +264,7 @@ function LoginContent() {
         email,
         reraNumber,
         location: agentLocation,
+        interestedProperties,
         refCode,
       });
 
@@ -645,6 +647,30 @@ function LoginContent() {
                   <option key={loc} value={loc}>{loc}</option>
                 ))}
               </select>
+            </div>
+
+            {/* Interested In Selling */}
+            <div className="space-y-2">
+              <label className="block uppercase text-[9px] font-bold tracking-wider">Interested in Selling *</label>
+              <div className="grid grid-cols-2 gap-2">
+                {["Apartment", "Plot", "Villa", "Commercial"].map((type) => (
+                  <label key={type} className="flex items-center space-x-2 text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 cursor-pointer hover:border-[#25d366] transition">
+                    <input
+                      type="checkbox"
+                      className="rounded text-[#25d366] focus:ring-[#25d366] cursor-pointer"
+                      checked={interestedProperties.includes(type)}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setInterestedProperties([...interestedProperties, type]);
+                        } else {
+                          setInterestedProperties(interestedProperties.filter(t => t !== type));
+                        }
+                      }}
+                    />
+                    <span>{type}</span>
+                  </label>
+                ))}
+              </div>
             </div>
 
             <div className="grid grid-cols-2 gap-3 pt-1">

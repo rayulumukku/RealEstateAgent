@@ -9,6 +9,7 @@ import {
   Award, ShieldCheck, Zap, Laptop, Shield,
   Layers, Volume2, Gift, CheckCircle2, ChevronRight 
 } from "lucide-react";
+import WhatsAppSimulationWidget from "@/components/WhatsAppSimulationWidget";
 
 function LandingContent() {
   const [activeChatMsg, setActiveChatMsg] = useState(0);
@@ -528,6 +529,9 @@ function LandingContent() {
           </div>
         </div>
       </footer>
+      
+      {/* Bot Simulator for Registration */}
+      <WhatsAppSimulationWidget />
     </div>
   );
 }

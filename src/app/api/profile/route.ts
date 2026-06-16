@@ -51,7 +51,8 @@ export async function GET() {
       .maybeSingle();
 
     if (parentProfile) {
-      profile.credits = parentProfile.credits;
+      // Don't overwrite the sub-builder's own credits. Just attach parent_credits if needed.
+      profile.parent_credits = parentProfile.credits;
     }
   }
 

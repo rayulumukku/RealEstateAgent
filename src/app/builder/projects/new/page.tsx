@@ -41,6 +41,7 @@ export default function NewProject() {
 
   // WhatsApp Broadcast Targets & Filters
   const [recipientFilter, setRecipientFilter] = useState<"all" | "verified" | "rera">("all");
+  const [interestedPropertyTarget, setInterestedPropertyTarget] = useState("All");
   const [selectedLocations, setSelectedLocations] = useState<string[]>([]);
   const [locationSearch, setLocationSearch] = useState("");
   const [showLocationDropdown, setShowLocationDropdown] = useState(false);
@@ -64,6 +65,10 @@ export default function NewProject() {
           query = query.in("location", selectedLocations);
         }
 
+        if (interestedPropertyTarget !== "All") {
+          query = query.contains("interested_properties", [interestedPropertyTarget]);
+        }
+
         const { count } = await query;
         setEstimatedReach(count || 0);
       } catch {
@@ -71,7 +76,7 @@ export default function NewProject() {
       }
     }
     fetchEstimatedReach();
-  }, [recipientFilter, selectedLocations]);
+  }, [recipientFilter, selectedLocations, interestedPropertyTarget]);
 
   const toggleLocation = (loc: string) => {
     setSelectedLocations((prev) =>
@@ -160,7 +165,8 @@ export default function NewProject() {
       propType, 
       parsedUnits,
       recipientFilter,
-      selectedLocations.length > 0 ? selectedLocations : undefined
+      selectedLocations.length > 0 ? selectedLocations : undefined,
+      interestedPropertyTarget
     );
 
     if (res.ok) {
@@ -273,6 +279,21 @@ export default function NewProject() {
                       <option value="all">To All Agents</option>
                       <option value="verified">Only Verified Agents</option>
                       <option value="rera">RERA Approved Agents</option>
+                    </select>
+                  </div>
+
+                  <div className="space-y-1.5 col-span-2 sm:col-span-1">
+                    <label className="block uppercase tracking-wider text-[10px]">Interested In Filter</label>
+                    <select 
+                      value={interestedPropertyTarget}
+                      onChange={(e) => setInterestedPropertyTarget(e.target.value)}
+                      className="w-full bg-slate-50 border border-slate-200 focus:border-[#25d366] rounded-xl py-2.5 px-3 text-slate-850 outline-none text-xs font-semibold transition"
+                    >
+                      <option value="All">All Types</option>
+                      <option value="Apartment">Apartments Only</option>
+                      <option value="Plot">Plots Only</option>
+                      <option value="Villa">Villas Only</option>
+                      <option value="Commercial">Commercial Only</option>
                     </select>
                   </div>
                 </div>

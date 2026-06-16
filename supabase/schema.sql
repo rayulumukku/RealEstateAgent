@@ -48,6 +48,7 @@ CREATE TABLE profiles (
   referrals_count INTEGER DEFAULT 0 NOT NULL,
   rejection_reason TEXT,
   location VARCHAR(100) DEFAULT 'Hyderabad',
+  interested_properties TEXT[] DEFAULT '{}',
   parent_id UUID REFERENCES profiles(id) ON DELETE SET NULL,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP NOT NULL
 );

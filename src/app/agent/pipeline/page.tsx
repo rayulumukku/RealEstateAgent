@@ -43,6 +43,7 @@ const STAGE_MAP_UI_TO_DB: Record<Client["stage"], string> = {
 export default function ClientPipeline() {
   const [view, setView] = useState<"kanban" | "list">("kanban");
   const [searchQuery, setSearchQuery] = useState("");
+  const [filterType, setFilterType] = useState<"All" | "Apartment" | "Plot" | "Villa" | "Commercial">("All");
   const [showAddModal, setShowAddModal] = useState(false);
   const [loading, setLoading] = useState(true);
   const [agentId, setAgentId] = useState<string | null>(null);
@@ -121,11 +122,15 @@ export default function ClientPipeline() {
   }, []);
 
   // Filter clients based on search query
-  const filteredClients = clients.filter(client => 
-    client.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    client.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    client.bhk.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  const filteredClients = clients.filter(client => {
+    const matchesSearch = 
+      client.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      client.location.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      client.bhk.toLowerCase().includes(searchQuery.toLowerCase());
+    
+    const matchesType = filterType === "All" || client.propertyType === filterType;
+    return matchesSearch && matchesType;
+  });
 
   const handleAddClient = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -268,13 +273,22 @@ export default function ClientPipeline() {
             placeholder="Search lead name, location, property type..." 
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full bg-white border border-slate-250 focus:border-[#25d366] rounded-xl py-2 pl-10 pr-4 text-xs text-slate-800 outline-none transition"
+            className="w-full bg-white border border-slate-200 focus:border-[#25d366] rounded-xl py-2 pl-10 pr-4 text-xs text-slate-800 outline-none transition"
           />
         </div>
-        <button className="px-4 py-2 bg-white border border-slate-200 hover:bg-slate-550 rounded-xl text-slate-600 flex items-center space-x-1.5 text-xs font-bold transition">
-          <Filter className="w-4 h-4" />
-          <span>Filters</span>
-        </button>
+        <div className="w-full md:w-48">
+          <select 
+            value={filterType}
+            onChange={(e) => setFilterType(e.target.value as any)}
+            className="w-full bg-white border border-slate-200 text-slate-600 rounded-xl py-2 px-3 outline-none focus:border-[#25d366] transition text-xs font-bold"
+          >
+            <option value="All">All Types</option>
+            <option value="Apartment">Apartment</option>
+            <option value="Plot">Plot</option>
+            <option value="Villa">Villa</option>
+            <option value="Commercial">Commercial</option>
+          </select>
+        </div>
       </div>
 
       {/* Main Boards */}

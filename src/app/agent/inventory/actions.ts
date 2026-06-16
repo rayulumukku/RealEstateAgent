@@ -253,7 +253,8 @@ export async function getAgentInventoryProjects(): Promise<DBProject[]> {
 
       // Fallback details from project itself or first unit details
       const pd = p.details || {};
-      const type: "Plot" | "Villa" | "Apartment" | "Commercial" = typeMap[p.type] || "Apartment";
+      const rawType = (p.type || "apartment").toLowerCase();
+      const type: "Plot" | "Villa" | "Apartment" | "Commercial" = typeMap[rawType] || "Apartment";
 
       // Detect premium status (if price exceeds 1.5 Cr or explicitly premium)
       const isPremium = pd.isPremium ?? pd.is_premium ?? (p.price_range && (p.price_range.includes("Cr") || p.price_range.includes("cr")));

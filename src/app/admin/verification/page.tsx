@@ -348,6 +348,22 @@ export default function VerificationQueue() {
                             setRequests(prev => prev.map(r => r.id === selectedRequest.id ? { ...r, isReraApproved: !checked } : r));
                             setSelectedRequest(prev => prev ? { ...prev, isReraApproved: !checked } : null);
                             alert("Failed to update RERA approval status: " + res.error);
+                          } else {
+                            // Send WhatsApp Notification
+                            if (selectedRequest.phone) {
+                              try {
+                                await fetch("/api/whatsapp/send", {
+                                  method: "POST",
+                                  headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify({
+                                    phone: selectedRequest.phone,
+                                    text: checked 
+                                      ? `✅ *RERA Approved:* Your RERA registration has been verified and approved by AgentsApp.`
+                                      : `❌ *RERA Rejected/Unapproved:* Your RERA registration could not be verified. Please update it from your profile or contact support.`
+                                  })
+                                });
+                              } catch { /* ignore */ }
+                            }
                           }
                         }}
                         className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 border-slate-350 cursor-pointer"

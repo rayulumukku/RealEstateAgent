@@ -14,6 +14,7 @@ export default function InventorySearch() {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterType, setFilterType] = useState<"All" | "Plot" | "Villa" | "Apartment" | "Commercial">("All");
   const [filterFacing, setFilterFacing] = useState("");
+  const [filterPrice, setFilterPrice] = useState("Any");
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -33,7 +34,24 @@ export default function InventorySearch() {
     const matchesType = filterType === "All" || project.type === filterType;
     const matchesFacing = filterFacing === "" || project.facing === filterFacing;
 
-    return matchesSearch && matchesType && matchesFacing;
+    let matchesPrice = true;
+    if (filterPrice !== "Any" && project.price) {
+      // Very basic price estimation logic
+      const priceStr = project.price.toLowerCase();
+      let estCr = 0;
+      if (priceStr.includes("cr")) {
+        const match = priceStr.match(/(\d+\.\d+)/);
+        if (match) estCr = parseFloat(match[1]);
+      } else if (priceStr.includes("l")) {
+        estCr = 0.5; // Treat anything in Lakhs as < 1.5 Cr
+      }
+
+      if (filterPrice === "< 1.5 Cr" && estCr >= 1.5) matchesPrice = false;
+      if (filterPrice === "1.5-3.0 Cr" && (estCr < 1.5 || estCr > 3.0)) matchesPrice = false;
+      if (filterPrice === "> 3.0 Cr" && estCr <= 3.0) matchesPrice = false;
+    }
+
+    return matchesSearch && matchesType && matchesFacing && matchesPrice;
   });
 
   const handleDownloadBrochure = (id: string, name: string) => {
@@ -104,11 +122,15 @@ export default function InventorySearch() {
           </div>
 
           <div>
-            <select className="w-full bg-white border border-slate-200 text-slate-600 rounded-xl py-2 px-3 outline-none focus:border-[#25d366] transition">
-              <option>Price Limit (Any)</option>
-              <option>&lt; ₹1.5 Cr</option>
-              <option>₹1.5 Cr - ₹3.0 Cr</option>
-              <option>&gt; ₹3.0 Cr</option>
+            <select 
+              value={filterPrice}
+              onChange={(e) => setFilterPrice(e.target.value)}
+              className="w-full bg-white border border-slate-200 text-slate-600 rounded-xl py-2 px-3 outline-none focus:border-[#25d366] transition"
+            >
+              <option value="Any">Price Limit (Any)</option>
+              <option value="< 1.5 Cr">&lt; ₹1.5 Cr</option>
+              <option value="1.5-3.0 Cr">₹1.5 Cr - ₹3.0 Cr</option>
+              <option value="> 3.0 Cr">&gt; ₹3.0 Cr</option>
             </select>
           </div>
 

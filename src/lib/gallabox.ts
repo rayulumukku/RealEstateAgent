@@ -6,6 +6,8 @@
 //   - /auth/actions          → OTP delivery
 // -----------------------------------------------------------------------------
 
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+
 export interface GallaBoxSendResult {
   ok: boolean;
   status: number | null;
@@ -33,6 +35,26 @@ export async function sendWhatsAppText(
   const apiSecret = process.env.GALLABOX_API_SECRET;
   const channelId = process.env.GALLABOX_CHANNEL_ID;
 
+  const cleanPhone = rawPhone.replace(/\D/g, "");
+  const finalPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+  const last10Digits = finalPhone.slice(-10);
+  const formattedPhone = `+91 ${last10Digits.slice(0, 5)} ${last10Digits.slice(5)}`;
+
+  // Log to database so the simulator widget can pick it up
+  try {
+    await supabaseAdmin.from("whatsapp_messages").insert([{
+      direction: "outbound",
+      phone: formattedPhone,
+      message_type: "text",
+      content: body,
+      source: "gallabox_lib",
+      outbound_status: apiKey ? 1 : 0,
+      error_message: apiKey ? null : "GallaBox not configured"
+    }]);
+  } catch (dbErr) {
+    console.error("Failed to log outbound whatsapp message:", dbErr);
+  }
+
   if (!apiKey || !apiSecret || !channelId) {
     return {
       ok: false,
@@ -42,8 +64,7 @@ export async function sendWhatsAppText(
     };
   }
 
-  const cleanPhone = rawPhone.replace(/\D/g, "");
-  const finalPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
+
 
   try {
     const res = await fetch("https://server.gallabox.com/devapi/messages/whatsapp", {

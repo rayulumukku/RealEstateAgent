@@ -14,7 +14,7 @@ export default function FollowProjectPage() {
     async function processFollow() {
       const projectId = searchParams.get("project_id");
       if (!projectId) {
-        setStatus("Invalid project link.");
+        setStatus("❌ Invalid project link.");
         return;
       }
 
@@ -25,18 +25,25 @@ export default function FollowProjectPage() {
         return;
       }
 
-      setStatus("Following project...");
+      setStatus("⏳ Following project...");
       
       // We use the event RSVP system under the hood where event.id = project.id
       const result = await respondToInvitation(phone, projectId, "accepted");
       
       if (result.ok) {
-        setStatus("Successfully followed! Redirecting...");
+        setStatus("✅ You are now following this project! Redirecting...");
         setTimeout(() => {
+          // Redirect to the following projects page
           router.push("/agent/following");
         }, 1500);
       } else {
-        setStatus("Failed to follow project: " + result.error);
+        // If already following, just redirect
+        if (result.error?.includes("already")) {
+          setStatus("✅ Already following! Redirecting...");
+          setTimeout(() => router.push("/agent/following"), 1000);
+        } else {
+          setStatus("❌ Failed: " + result.error);
+        }
       }
     }
 

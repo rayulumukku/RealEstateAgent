@@ -393,6 +393,7 @@ export interface SubmitKycInput {
   email: string;
   reraNumber: string;
   location?: string;
+  interestedProperties?: string[];
   refCode?: string | null;
 }
 
@@ -418,9 +419,11 @@ async function submitKycImpl(input: SubmitKycInput): Promise<SubmitKycResult> {
     !input.fullName?.trim() ||
     !input.agencyName?.trim() ||
     !input.email?.trim() ||
-    !input.reraNumber?.trim()
+    !input.reraNumber?.trim() ||
+    !input.interestedProperties ||
+    input.interestedProperties.length === 0
   ) {
-    return { ok: false, error: "All fields are required." };
+    return { ok: false, error: "All fields are required including interested property types." };
   }
 
   // Proof of phone ownership: there must be an OTP session for this phone
@@ -465,6 +468,7 @@ async function submitKycImpl(input: SubmitKycInput): Promise<SubmitKycResult> {
         points: 0,
         referrals_count: 0,
         location: input.location || "Hyderabad",
+        interested_properties: input.interestedProperties,
       },
     ])
     .select()
@@ -757,6 +761,39 @@ export async function loginWithPhone(input: { phone: string; role?: string }): P
   } catch (err) {
     console.error("loginWithPhone threw:", err);
     return { ok: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
+// -----------------------------------------------------------------------------
+// getNewSimulatedMessages — fetches new simulated outbound broadcasts
+// -----------------------------------------------------------------------------
+export async function getNewSimulatedMessages(
+  phone: string,
+  since: string,
+  direction?: "inbound" | "outbound"
+): Promise<{ ok: boolean; messages?: any[]; error?: string }> {
+  try {
+    const formattedPhone = formatPhone(phone);
+    if (!formattedPhone) return { ok: false, error: "Invalid phone number" };
+
+    let query = supabaseAdmin
+      .from("whatsapp_messages")
+      .select("id, content, created_at, direction")
+      .eq("phone", formattedPhone)
+      .gt("created_at", since)
+      .order("created_at", { ascending: true });
+
+    if (direction) {
+      query = query.eq("direction", direction);
+    }
+
+    const { data, error } = await query;
+
+    if (error) throw error;
+    return { ok: true, messages: data || [] };
+  } catch (err: any) {
+    console.error("getNewSimulatedMessages error:", err);
+    return { ok: false, error: err.message || String(err) };
   }
 }
 

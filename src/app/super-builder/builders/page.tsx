@@ -34,6 +34,29 @@ interface SubBuilder {
   created_at: string;
 }
 
+function maskPhone(phone: string): string {
+  if (!phone) return "";
+  const cleaned = phone.trim();
+  
+  if (cleaned.startsWith("+91")) {
+    const parts = cleaned.split(" ");
+    if (parts.length === 3) {
+      const p1 = parts[1];
+      const p2 = parts[2];
+      return `+91 ${p1.slice(0, 3)}** **${p2.slice(-3)}`;
+    }
+  }
+  
+  const digitsOnly = cleaned.replace(/\D/g, "");
+  if (digitsOnly.length >= 10) {
+    const start = digitsOnly.slice(0, 3);
+    const end = digitsOnly.slice(-3);
+    return `+91 ${start}** **${end}`;
+  }
+  
+  return cleaned;
+}
+
 export default function ManageBuildersPage() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"builders" | "assignments">("builders");
@@ -529,7 +552,7 @@ export default function ManageBuildersPage() {
                         ) : (
                           <div className="flex flex-wrap gap-1 mt-1 max-w-[200px]">
                             {builderAssignments.slice(0, 3).map((a: any) => (
-                              <span key={a.agent_id} className="text-[9px] bg-purple-50 text-purple-700 border border-purple-100 px-1.5 py-0.5 rounded font-extrabold" title={a.profiles?.phone}>
+                              <span key={a.agent_id} className="text-[9px] bg-purple-50 text-purple-700 border border-purple-100 px-1.5 py-0.5 rounded font-extrabold" title={maskPhone(a.profiles?.phone)}>
                                 {a.profiles?.name || "Agent"}
                               </span>
                             ))}
@@ -552,7 +575,7 @@ export default function ManageBuildersPage() {
                         ) : (
                           <div className="flex flex-wrap gap-1 mt-1 max-w-[200px]">
                             {builderFollowers.slice(0, 3).map((f: any) => (
-                              <span key={f.agent_id} className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded font-extrabold" title={f.profiles?.phone}>
+                              <span key={f.agent_id} className="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-100 px-1.5 py-0.5 rounded font-extrabold" title={maskPhone(f.profiles?.phone)}>
                                 {f.profiles?.name || "Agent"}
                               </span>
                             ))}
@@ -995,7 +1018,7 @@ export default function ManageBuildersPage() {
                                   </span>
                                 )}
                               </div>
-                              <p className="text-[10px] text-slate-500 mt-0.5">{agent.agency_name || "Independent Agent"} · {agent.phone}</p>
+                              <p className="text-[10px] text-slate-500 mt-0.5">{agent.agency_name || "Independent Agent"} · {maskPhone(agent.phone)}</p>
                             </div>
                           </div>
                           {agent.location && (
@@ -1257,7 +1280,7 @@ export default function ManageBuildersPage() {
                               <div key={agent.id} className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex justify-between items-center text-xs font-bold">
                                 <div>
                                   <p className="text-slate-900">{agent.name}</p>
-                                  <p className="text-[10px] text-slate-500 mt-0.5">{agent.phone} · {agent.agency_name || "Independent"}</p>
+                                  <p className="text-[10px] text-slate-500 mt-0.5">{maskPhone(agent.phone)} · {agent.agency_name || "Independent"}</p>
                                 </div>
                                 {agent.location && (
                                   <span className="text-[10px] bg-white border border-slate-200 px-2 py-0.5 rounded text-slate-500 font-semibold">
@@ -1284,7 +1307,7 @@ export default function ManageBuildersPage() {
                               <div key={follower.id} className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex justify-between items-center text-xs font-bold">
                                 <div>
                                   <p className="text-slate-900">{follower.name}</p>
-                                  <p className="text-[10px] text-slate-500 mt-0.5">{follower.phone} · {follower.agency_name || "Independent"}</p>
+                                  <p className="text-[10px] text-slate-500 mt-0.5">{maskPhone(follower.phone)} · {follower.agency_name || "Independent"}</p>
                                 </div>
                                 {follower.location && (
                                   <span className="text-[10px] bg-white border border-slate-200 px-2 py-0.5 rounded text-slate-500 font-semibold">

@@ -25,7 +25,8 @@ export async function saveProjectAction(
   type: string,
   units: ParsedUnit[],
   recipientFilter?: "all" | "verified" | "rera",
-  targetLocations?: string[]
+  targetLocations?: string[],
+  interestedPropertyTarget?: string
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     let profile: any = null;
@@ -82,7 +83,7 @@ export async function saveProjectAction(
     // Get the targeted agents count for credits validation
     let agentQuery = supabaseAdmin
       .from("profiles")
-      .select("phone")
+      .select("id, phone")
       .eq("role", "agent");
 
     if (recipientFilter === "verified") {
@@ -95,6 +96,11 @@ export async function saveProjectAction(
       agentQuery = agentQuery.in("location", targetLocations);
     }
 
+    if (interestedPropertyTarget && interestedPropertyTarget !== "All") {
+      // Use contains for array column
+      agentQuery = agentQuery.contains("interested_properties", [interestedPropertyTarget]);
+    }
+
     const { data: agents, error: agentsError } = await agentQuery;
     if (agentsError) {
       console.error("Error querying targeted agents:", agentsError);
@@ -103,20 +109,10 @@ export async function saveProjectAction(
 
     const cost = agents ? agents.length : 0;
     
-    // Resolve credits validation and deduction from parent super builder if sub-builder
+    // Resolve credits validation and deduction.
+    // Sub-builders now use their own assigned credits.
     let targetProfile = profile;
     let builderCredits = profile.credits || 0;
-    if (profile.parent_id) {
-      const { data: parentProfile } = await supabaseAdmin
-        .from("profiles")
-        .select("id, credits")
-        .eq("id", profile.parent_id)
-        .maybeSingle();
-      if (parentProfile) {
-        targetProfile = parentProfile;
-        builderCredits = parentProfile.credits || 0;
-      }
-    }
 
     if (builderCredits < cost) {
       return { 
@@ -202,22 +198,36 @@ export async function saveProjectAction(
     });
 
     if (agents && agents.length > 0) {
+        // Also record this broadcast in the campaigns table so it shows up in Admin Monitor
+        const audienceName = `Launch: ${targetLocations && targetLocations.length > 0 ? targetLocations.join(", ") : "All Areas"} - ${recipientFilter} - ${interestedPropertyTarget || "All Types"}`;
+        
+        await supabaseAdmin.from("campaigns").insert({
+            builder_id: profile.id,
+            name: name,
+            audience_segment: audienceName,
+            template: "project_launch",
+            sent_count: cost,
+            read_rate: 0.0,
+        });
+
         const apiKey = process.env.GALLABOX_API_KEY;
         const apiSecret = process.env.GALLABOX_API_SECRET;
         const channelId = process.env.GALLABOX_CHANNEL_ID;
-        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://agent4-ochre.vercel.app";
+        const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://agentsapp.online";
 
-        if (!apiKey || !apiSecret || !channelId) {
-            console.warn("GallaBox not configured, skipping WhatsApp notifications.");
-        } else {
-            Promise.all(agents.map(async (agent) => {
+        await Promise.all(agents.map(async (agent) => {
+            if (!agent.phone) return;
+            const digits = agent.phone.replace(/\D/g, "");
+            const finalPhone = digits.length === 10 ? `91${digits}` : digits;
+
+            const followUrl = `${baseUrl}/agent/follow?project_id=${project.id}`;
+            const messageText = `🚀 *New Project Launched!*\n\n*${name}* in ${location} is now live on the platform.\nStarting at ${priceEstimate}.\n\nTap the link below to follow and track this project:\n${followUrl}`;
+
+            let status = 0;
+            let errMsg: string | null = null;
+
+            if (apiKey && apiSecret && channelId) {
                 try {
-                    const digits = agent.phone.replace(/\D/g, "");
-                    const finalPhone = digits.length === 10 ? `91${digits}` : digits;
-
-                    const followUrl = `${baseUrl}/agent/follow?project_id=${project.id}`;
-                    const text = `🚀 *New Project Launched!*\n\n*${name}* in ${location} is now live on the platform.\nStarting at ${priceEstimate}.\n\nTap the link below to follow and track this project:\n${followUrl}`;
-
                     const res = await fetch("https://server.gallabox.com/devapi/messages/whatsapp", {
                         method: "POST",
                         headers: {
@@ -229,16 +239,36 @@ export async function saveProjectAction(
                             channelId,
                             channelType: "whatsapp",
                             recipient: { name: "Agent", phone: finalPhone },
-                            whatsapp: { type: "text", text: { body: text } }
+                            whatsapp: { type: "text", text: { body: messageText } }
                         })
                     });
-                    const data = await res.json();
-                    console.log(`WhatsApp sent to ${agent.phone}:`, JSON.stringify(data));
-                } catch (err) {
-                    console.error("Error notifying agent via WhatsApp:", agent.phone, err);
+                    status = res.status;
+                    if (!res.ok) {
+                        const errData = await res.json().catch(() => ({}));
+                        errMsg = JSON.stringify(errData).slice(0, 500);
+                    }
+                } catch (fetchErr: any) {
+                    console.error("GallaBox send error:", fetchErr);
+                    errMsg = fetchErr.message || String(fetchErr);
                 }
-            })).catch(console.error);
-        }
+            } else {
+                errMsg = "GallaBox not configured (simulated)";
+            }
+
+            // Always write the message to the audit log so the agent's web chatbot can poll and receive it automatically
+            await supabaseAdmin
+                .from("whatsapp_messages")
+                .insert({
+                    direction: "outbound",
+                    phone: agent.phone,
+                    agent_id: agent.id,
+                    message_type: "text",
+                    content: messageText,
+                    source: apiKey && apiSecret && channelId ? "gallabox" : "simulator",
+                    outbound_status: status,
+                    error_message: errMsg
+                });
+        }));
     }
 
     return { ok: true };

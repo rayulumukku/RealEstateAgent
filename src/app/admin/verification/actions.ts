@@ -24,6 +24,8 @@ export async function getVerificationRequests() {
   }
 }
 
+import { sendWhatsAppText } from "@/lib/gallabox";
+
 export async function approveAgentAction(id: string, phone: string, name: string) {
   try {
     const generatedId = `CP-${Math.floor(1000 + Math.random() * 9000)}`;
@@ -74,6 +76,10 @@ export async function approveAgentAction(id: string, phone: string, name: string
           .eq("id", referrer.id);
       }
     }
+
+    // 3. Send WhatsApp confirmation message
+    const msg = `🎉 Congratulations ${name}!\n\nYour profile has been verified by the admin.\nYour Partner ID is: *${generatedId}*\n\nYou can now log in to the portal and start using AgentsApp!`;
+    await sendWhatsAppText(phone, msg);
 
     return { success: true, generatedId };
   } catch (err: any) {
