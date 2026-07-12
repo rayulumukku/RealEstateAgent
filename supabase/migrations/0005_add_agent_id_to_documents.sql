@@ -1,0 +1,1 @@
+ALTER TABLE documents ADD COLUMN agent_id UUID REFERENCES profiles(id) ON DELETE CASCADE;

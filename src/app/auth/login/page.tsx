@@ -63,17 +63,27 @@ function LoginContent() {
 
     // Quick client-side check first (instant, no network)
     try {
-      const sessionActive = localStorage.getItem("agentsapp_session_active");
-      const storedRole = localStorage.getItem("agentsapp_logged_in_role");
-      if (sessionActive === "1" && storedRole) {
-        const dashboard =
-          storedRole === "super_admin" ? "/super-admin/dashboard" :
-          storedRole === "super_builder" ? "/super-builder/dashboard" :
-          storedRole === "builder" ? "/builder/dashboard" :
-          storedRole === "admin" || storedRole === "verification" || storedRole === "operations" ? "/admin/dashboard" :
-          "/agent/dashboard";
-        window.location.assign(dashboard);
-        return;
+      const searchParams = new URLSearchParams(window.location.search);
+      if (searchParams.has("next")) {
+        // If 'next' is in the URL, the proxy (middleware) bounced us here because the cookie is missing or invalid.
+        // This means our localStorage is stale and we should NOT trust it, otherwise we'll get an infinite redirect loop.
+        localStorage.removeItem("agentsapp_session_active");
+        localStorage.removeItem("agentsapp_logged_in_role");
+        localStorage.removeItem("agentsapp_logged_in_phone");
+        localStorage.removeItem("agentsapp_logged_in_user");
+      } else {
+        const sessionActive = localStorage.getItem("agentsapp_session_active");
+        const storedRole = localStorage.getItem("agentsapp_logged_in_role");
+        if (sessionActive === "1" && storedRole) {
+          const dashboard =
+            storedRole === "super_admin" ? "/super-admin/dashboard" :
+            storedRole === "super_builder" ? "/super-builder/dashboard" :
+            storedRole === "builder" ? "/builder/dashboard" :
+            storedRole === "admin" || storedRole === "verification" || storedRole === "operations" ? "/admin/dashboard" :
+            "/agent/dashboard";
+          window.location.assign(dashboard);
+          return;
+        }
       }
     } catch { /* private mode */ }
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Bell, Plus, Loader2, CheckCircle2, Circle, Trash2, X, Clock } from "lucide-react";
+import { Bell, Plus, Loader2, CheckCircle2, Circle, Trash2, X, Clock, Calendar as CalendarIcon, List } from "lucide-react";
 import { getAgentReminders, addReminder, toggleReminderComplete, deleteReminder, Reminder } from "./actions";
 
 export default function RemindersPage() {
@@ -10,6 +10,11 @@ export default function RemindersPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [adding, setAdding] = useState(false);
   const [message, setMessage] = useState("");
+  const [viewMode, setViewMode] = useState<"list" | "calendar">("list");
+  
+  // Calendar state
+  const [currentDate, setCurrentDate] = useState(new Date());
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
   const [form, setForm] = useState({
     title: "",
@@ -82,42 +87,78 @@ export default function RemindersPage() {
 
   return (
     <div className="space-y-6 text-slate-800">
-      <div className="flex justify-between items-center">
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
         <div>
-          <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">Reminders</h1>
+          <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight flex items-center gap-2">
+            <Bell className="w-6 h-6 text-indigo-600" />
+            <span>Reminders</span>
+          </h1>
           <p className="text-[#64748b] text-xs font-semibold mt-0.5">Schedule follow-ups and never miss a call.</p>
         </div>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="px-4 py-2.5 bg-[#25d366] hover:bg-[#16c47f] text-white font-bold rounded-xl text-xs flex items-center space-x-1.5 transition"
-        >
-          <Plus className="w-4 h-4" />
-          <span>New Reminder</span>
-        </button>
-      </div>
-
-      {/* Pending Reminders */}
-      <div className="space-y-3">
-        <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Upcoming ({pending.length})</h2>
-        {pending.length === 0 && (
-          <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center text-slate-400 text-xs">
-            <Bell className="w-5 h-5 mx-auto mb-2" />
-            No pending reminders. Add one to stay on track.
+        
+        <div className="flex items-center space-x-3 w-full sm:w-auto">
+          {/* View Toggle */}
+          <div className="flex bg-slate-100 p-1 rounded-xl">
+            <button
+              onClick={() => setViewMode("list")}
+              className={`p-1.5 rounded-lg flex items-center justify-center transition-all ${viewMode === "list" ? "bg-white shadow-sm text-indigo-600" : "text-slate-400 hover:text-slate-600"}`}
+              title="List View"
+            >
+              <List className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setViewMode("calendar")}
+              className={`p-1.5 rounded-lg flex items-center justify-center transition-all ${viewMode === "calendar" ? "bg-white shadow-sm text-indigo-600" : "text-slate-400 hover:text-slate-600"}`}
+              title="Calendar View"
+            >
+              <CalendarIcon className="w-4 h-4" />
+            </button>
           </div>
-        )}
-        {pending.map((r) => (
-          <ReminderCard key={r.id} reminder={r} onToggle={handleToggle} onDelete={handleDelete} />
-        ))}
+
+          <button
+            onClick={() => setShowAdd(true)}
+            className="flex-1 sm:flex-none px-4 py-2.5 bg-[#25d366] hover:bg-[#16c47f] text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-1.5 transition shadow-sm"
+          >
+            <Plus className="w-4 h-4" />
+            <span>New Reminder</span>
+          </button>
+        </div>
       </div>
 
-      {/* Completed */}
-      {completed.length > 0 && (
-        <div className="space-y-3">
-          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Completed ({completed.length})</h2>
-          {completed.map((r) => (
-            <ReminderCard key={r.id} reminder={r} onToggle={handleToggle} onDelete={handleDelete} />
-          ))}
-        </div>
+      {viewMode === "list" ? (
+        <>
+          {/* Pending Reminders */}
+          <div className="space-y-3">
+            <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Upcoming ({pending.length})</h2>
+            {pending.length === 0 && (
+              <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center text-slate-400 text-xs">
+                <Bell className="w-5 h-5 mx-auto mb-2 opacity-50" />
+                No pending reminders. Add one to stay on track.
+              </div>
+            )}
+            {pending.map((r) => (
+              <ReminderCard key={r.id} reminder={r} onToggle={handleToggle} onDelete={handleDelete} />
+            ))}
+          </div>
+
+          {/* Completed */}
+          {completed.length > 0 && (
+            <div className="space-y-3">
+              <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Completed ({completed.length})</h2>
+              {completed.map((r) => (
+                <ReminderCard key={r.id} reminder={r} onToggle={handleToggle} onDelete={handleDelete} />
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <CalendarView 
+          reminders={reminders} 
+          currentDate={currentDate}
+          setCurrentDate={setCurrentDate}
+          onToggle={handleToggle}
+          onDelete={handleDelete}
+        />
       )}
 
       {/* Add Reminder Modal */}
@@ -232,12 +273,168 @@ function ReminderCard({
         </div>
       </div>
 
-      <button
-        onClick={() => onDelete(reminder.id)}
-        className="shrink-0 text-slate-300 hover:text-red-500 transition"
-      >
-        <Trash2 className="w-4 h-4" />
-      </button>
+    </div>
+  );
+}
+
+// ----------------------------------------------------------------------
+// Calendar View Component
+// ----------------------------------------------------------------------
+function CalendarView({ 
+  reminders, 
+  currentDate, 
+  setCurrentDate,
+  onToggle,
+  onDelete
+}: { 
+  reminders: Reminder[];
+  currentDate: Date;
+  setCurrentDate: (d: Date) => void;
+  onToggle: (id: string, current: boolean) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [selectedDate, setSelectedDate] = useState<Date | null>(null);
+
+  const getDaysInMonth = (year: number, month: number) => new Date(year, month + 1, 0).getDate();
+  const getFirstDayOfMonth = (year: number, month: number) => new Date(year, month, 1).getDay();
+
+  const year = currentDate.getFullYear();
+  const month = currentDate.getMonth();
+  
+  const daysInMonth = getDaysInMonth(year, month);
+  const firstDay = getFirstDayOfMonth(year, month);
+  
+  const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+  const prevMonth = () => setCurrentDate(new Date(year, month - 1, 1));
+  const nextMonth = () => setCurrentDate(new Date(year, month + 1, 1));
+  const today = new Date();
+
+  // Helper to check if a reminder falls on a specific calendar day
+  const getRemindersForDay = (day: number) => {
+    return reminders.filter(r => {
+      // If it has a strict ISO date (from manual UI entry)
+      if (r.remind_at) {
+        const d = new Date(r.remind_at);
+        return d.getDate() === day && d.getMonth() === month && d.getFullYear() === year;
+      }
+      // If it's a string from WhatsApp like "Tomorrow, 10:00 AM" or "Today, 5:00 PM"
+      if (r.scheduled_time) {
+        const lowerTime = r.scheduled_time.toLowerCase();
+        
+        // Very basic matching for today/tomorrow text for demo purposes
+        if (lowerTime.includes("today")) {
+          return day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+        }
+        if (lowerTime.includes("tomorrow")) {
+          const tomorrow = new Date(today);
+          tomorrow.setDate(tomorrow.getDate() + 1);
+          return day === tomorrow.getDate() && month === tomorrow.getMonth() && year === tomorrow.getFullYear();
+        }
+        
+        // If we can't parse it easily, we just don't show it in the strict calendar grid
+        return false;
+      }
+      return false;
+    });
+  };
+
+  const selectedDayReminders = selectedDate ? getRemindersForDay(selectedDate.getDate()) : [];
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        {/* Calendar Header */}
+        <div className="flex justify-between items-center p-4 border-b border-slate-100 bg-slate-50/50">
+          <button onClick={prevMonth} className="p-2 hover:bg-slate-200 rounded-lg text-slate-600 transition">
+            ←
+          </button>
+          <h2 className="text-sm font-black text-slate-800 tracking-wide uppercase">
+            {monthNames[month]} {year}
+          </h2>
+          <button onClick={nextMonth} className="p-2 hover:bg-slate-200 rounded-lg text-slate-600 transition">
+            →
+          </button>
+        </div>
+
+        {/* Calendar Grid */}
+        <div className="p-4">
+          <div className="grid grid-cols-7 gap-2 mb-2">
+            {days.map(d => (
+              <div key={d} className="text-center text-[10px] font-bold text-slate-400 uppercase">
+                {d}
+              </div>
+            ))}
+          </div>
+          
+          <div className="grid grid-cols-7 gap-2">
+            {Array.from({ length: firstDay }).map((_, i) => (
+              <div key={`empty-${i}`} className="p-2" />
+            ))}
+            
+            {Array.from({ length: daysInMonth }).map((_, i) => {
+              const day = i + 1;
+              const isToday = day === today.getDate() && month === today.getMonth() && year === today.getFullYear();
+              const isSelected = selectedDate?.getDate() === day && selectedDate?.getMonth() === month;
+              const dayReminders = getRemindersForDay(day);
+              const pendingCount = dayReminders.filter(r => !r.is_completed).length;
+              
+              return (
+                <button
+                  key={day}
+                  onClick={() => setSelectedDate(new Date(year, month, day))}
+                  className={`
+                    min-h-[60px] p-1 rounded-xl border flex flex-col items-center justify-start transition-all relative
+                    ${isSelected ? "border-indigo-500 bg-indigo-50 shadow-sm" : "border-slate-100 hover:border-slate-300 hover:bg-slate-50"}
+                    ${isToday && !isSelected ? "bg-emerald-50/50 border-emerald-200" : ""}
+                  `}
+                >
+                  <span className={`text-xs font-bold ${isToday ? "text-emerald-600" : isSelected ? "text-indigo-700" : "text-slate-700"}`}>
+                    {day}
+                  </span>
+                  
+                  {dayReminders.length > 0 && (
+                    <div className="mt-1 flex flex-wrap justify-center gap-1">
+                      {pendingCount > 0 ? (
+                        <span className="w-2 h-2 rounded-full bg-amber-500" title={`${pendingCount} pending`} />
+                      ) : (
+                        <span className="w-2 h-2 rounded-full bg-[#25d366]" title="All completed" />
+                      )}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      {/* Selected Date Reminders */}
+      {selectedDate && (
+        <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200">
+          <div className="flex justify-between items-center mb-4">
+            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wider">
+              Reminders for {selectedDate.toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" })}
+            </h3>
+            <button onClick={() => setSelectedDate(null)} className="text-slate-400 hover:text-slate-600">
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+          
+          {selectedDayReminders.length === 0 ? (
+            <div className="text-center text-slate-400 text-xs py-4 font-semibold">
+              No reminders scheduled for this date.
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {selectedDayReminders.map(r => (
+                <ReminderCard key={r.id} reminder={r} onToggle={onToggle} onDelete={onDelete} />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

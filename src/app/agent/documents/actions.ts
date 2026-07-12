@@ -49,6 +49,26 @@ export async function getAgentDocuments(phone: string): Promise<AgentDocument[]>
   }));
 }
 
+// Fetch shared builder documents (where agent_id IS NULL)
+export async function getSharedDocuments(): Promise<AgentDocument[]> {
+  const { data: docs } = await supabaseAdmin
+    .from("documents")
+    .select("id, name, type, url, send_count, view_count, created_at, projects(name)")
+    .is("agent_id", null)
+    .order("created_at", { ascending: false });
+
+  return (docs || []).map((d: any) => ({
+    id: d.id,
+    name: d.name,
+    type: d.type,
+    url: d.url,
+    project_name: d.projects?.name || null,
+    created_at: d.created_at,
+    send_count: d.send_count || 0,
+    view_count: d.view_count || 0,
+  }));
+}
+
 // Upload a document: store file in Supabase Storage, then insert a row in documents
 export async function uploadAgentDocument(
   phone: string,

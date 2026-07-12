@@ -50,6 +50,47 @@ export default function AgentDashboard() {
   const [webinars, setWebinars] = useState<WebinarItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [matchNudge, setMatchNudge] = useState<any>(null);
+  
+  // Mock CP Invitations
+  const [pendingInvites, setPendingInvites] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const stored = localStorage.getItem("mock_agent_invites") || "[]";
+      try {
+        const parsed = JSON.parse(stored);
+        setPendingInvites(parsed);
+      } catch (e) {}
+    }
+  }, []);
+
+  const handleAcceptInvite = (builderId: string) => {
+    // 1. Remove from pending invites
+    const updatedInvites = pendingInvites.filter(id => id !== builderId);
+    setPendingInvites(updatedInvites);
+    localStorage.setItem("mock_agent_invites", JSON.stringify(updatedInvites));
+
+    // 2. Set connected status
+    if (profile?.id) {
+      const connections = JSON.parse(localStorage.getItem("mock_cp_connections") || "{}");
+      connections[profile.id] = "connected"; // Note: simple mock structure
+      localStorage.setItem("mock_cp_connections", JSON.stringify(connections));
+    }
+    alert("Invitation Accepted! You are now a Verified Channel Partner for this Builder.");
+  };
+
+  const handleRejectInvite = (builderId: string) => {
+    const updatedInvites = pendingInvites.filter(id => id !== builderId);
+    setPendingInvites(updatedInvites);
+    localStorage.setItem("mock_agent_invites", JSON.stringify(updatedInvites));
+    
+    // Clear invite status
+    if (profile?.id) {
+      const connections = JSON.parse(localStorage.getItem("mock_cp_connections") || "{}");
+      delete connections[profile.id];
+      localStorage.setItem("mock_cp_connections", JSON.stringify(connections));
+    }
+  };
 
   useEffect(() => {
     async function loadDashboardData() {
@@ -377,6 +418,47 @@ export default function AgentDashboard() {
             {webinars.length === 0 && (
               <div className="py-4 text-center text-slate-400 font-semibold text-xs border border-dashed rounded-xl">
                 No webinars scheduled.
+              </div>
+            )}
+          </div>
+
+          {/* Builder Invitations Widget */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider flex items-center space-x-1">
+              <span>CP Invitations</span>
+              {pendingInvites.length > 0 && (
+                <span className="w-2 h-2 rounded-full bg-red-500 inline-block animate-ping"></span>
+              )}
+            </h3>
+
+            {pendingInvites.length > 0 ? (
+              <div className="space-y-3">
+                {pendingInvites.map((id, idx) => (
+                  <div key={idx} className="p-3 bg-indigo-50/50 border border-indigo-100 rounded-xl space-y-3 text-xs">
+                    <div>
+                      <div className="font-bold text-slate-800">Builder Invitation</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">Wants you to join as a Channel Partner.</div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button 
+                        onClick={() => handleAcceptInvite(id)}
+                        className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-[10px] rounded-lg transition"
+                      >
+                        Accept
+                      </button>
+                      <button 
+                        onClick={() => handleRejectInvite(id)}
+                        className="w-full py-2 bg-white border border-slate-200 hover:bg-slate-50 text-slate-600 font-bold text-[10px] rounded-lg transition"
+                      >
+                        Decline
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="py-4 text-center text-slate-400 font-semibold text-xs border border-dashed rounded-xl">
+                No pending builder invitations.
               </div>
             )}
           </div>

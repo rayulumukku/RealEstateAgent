@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { 
   Building2, PlusCircle, Megaphone, Calendar,
-  LogOut, RefreshCw, BarChart3, Users, User, Crown, Layers, Coins
+  LogOut, RefreshCw, BarChart3, Users, User, Crown, Layers, Coins, FileText
 } from "lucide-react";
 import { performLogout } from "@/components/SessionSync";
 
@@ -39,6 +39,7 @@ export default function BuilderSidebar() {
     { name: "Overview", href: "/builder/dashboard", icon: BarChart3 },
     { name: "My Projects", href: "/builder/projects", icon: Building2 },
     { name: "My Inventory", href: "/builder/inventory", icon: Layers },
+    { name: "Documents", href: "/builder/documents", icon: FileText },
     { name: "Add Project", href: "/builder/projects/new", icon: PlusCircle },
     { name: "Campaigns", href: "/builder/campaigns", icon: Megaphone },
     { name: "My Events", href: "/builder/events", icon: Calendar },

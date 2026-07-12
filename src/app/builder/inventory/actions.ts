@@ -170,6 +170,20 @@ export async function updateUnitStatus(
   }
 }
 
+export async function deleteInventoryUnits(unitIds: string[]): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const { error } = await supabaseAdmin
+      .from("inventory_units")
+      .delete()
+      .in("id", unitIds);
+
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
+}
+
 export async function getProjectInventoryUnits(
   projectId: string
 ): Promise<InventoryUnit[]> {

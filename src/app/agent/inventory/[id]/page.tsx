@@ -136,10 +136,16 @@ export default function ProjectDetails() {
                 <span>View Live Unit Inventory</span>
               </button>
 
-              <button className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl flex items-center justify-center space-x-1.5 transition">
+              <a 
+                href={project.brochureUrl || "#"} 
+                download
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-3 bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs rounded-xl flex items-center justify-center space-x-1.5 transition"
+              >
                 <FileText className="w-4 h-4" />
                 <span>Download PDF Brochure</span>
-              </button>
+              </a>
             </div>
 
             <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 text-[10px] text-slate-500 space-y-1.5 font-semibold">

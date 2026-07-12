@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Building2, Loader2, MapPin, Trash2, Users, Search, X, Clock } from "lucide-react";
+import { Building2, Loader2, MapPin, Trash2, Users, Search, X, Clock, LayoutGrid, List } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { deleteProjectAction, getFollowersForEntity, FollowerInfo } from "./actions";
 import { maskPhone } from "@/lib/mask";
@@ -21,6 +21,7 @@ export default function BuilderProjects() {
   const [loading, setLoading] = useState(true);
   const [projects, setProjects] = useState<Project[]>([]);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
   // Followers modal state
   const [followersModal, setFollowersModal] = useState<{ entityId: string; entityType: "project" | "event" | "campaign"; entityName: string } | null>(null);
@@ -135,9 +136,27 @@ export default function BuilderProjects() {
   return (
     <div className="max-w-5xl space-y-6 text-slate-800">
       {/* Header */}
-      <div className="border-b border-slate-200 pb-5">
-        <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">My Projects</h1>
-        <p className="text-[#64748b] text-xs font-semibold mt-0.5">Manage and view all projects created by your company.</p>
+      <div className="border-b border-slate-200 pb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <h1 className="text-2xl font-extrabold text-slate-900 tracking-tight">My Projects</h1>
+          <p className="text-[#64748b] text-xs font-semibold mt-0.5">Manage and view all projects created by your company.</p>
+        </div>
+        <div className="flex bg-slate-100 p-1 rounded-lg self-start sm:self-auto shrink-0">
+          <button
+            onClick={() => setViewMode("grid")}
+            className={`p-1.5 rounded-md transition ${viewMode === "grid" ? "bg-white shadow-sm text-indigo-600" : "text-slate-500 hover:text-slate-700"}`}
+            title="Grid View"
+          >
+            <LayoutGrid className="w-4 h-4" />
+          </button>
+          <button
+            onClick={() => setViewMode("list")}
+            className={`p-1.5 rounded-md transition ${viewMode === "list" ? "bg-white shadow-sm text-indigo-600" : "text-slate-500 hover:text-slate-700"}`}
+            title="List View"
+          >
+            <List className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
       {loading ? (
@@ -154,61 +173,121 @@ export default function BuilderProjects() {
           </a>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div className={viewMode === "grid" ? "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" : "flex flex-col space-y-4"}>
           {projects.map((project) => (
-            <div key={project.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition overflow-hidden flex flex-col">
-              <div className="p-5 border-b border-slate-100 flex-1">
-                <div className="flex justify-between items-start mb-2">
-                  <div className="flex items-center space-x-2">
-                    <span className="px-2 py-1 bg-indigo-50 text-indigo-600 rounded text-[9px] font-bold uppercase tracking-wide">
-                      {project.type}
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-semibold">{timeAgo(project.created_at)}</span>
+            <div key={project.id} className={`bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition overflow-hidden ${viewMode === "list" ? "flex flex-col sm:flex-row sm:items-center" : "flex flex-col"}`}>
+              {viewMode === "grid" ? (
+                <>
+                  <div className="p-5 border-b border-slate-100 flex-1">
+                    <div className="flex justify-between items-start mb-2">
+                      <div className="flex items-center space-x-2">
+                        <span className="px-2 py-1 bg-indigo-50 text-indigo-600 rounded text-[9px] font-bold uppercase tracking-wide">
+                          {project.type}
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-semibold">{timeAgo(project.created_at)}</span>
+                      </div>
+                      <button 
+                        onClick={() => handleDelete(project.id, project.name)}
+                        disabled={deletingId === project.id}
+                        className="p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-lg transition disabled:opacity-50"
+                        title="Delete Project"
+                      >
+                        {deletingId === project.id ? (
+                          <Loader2 className="w-4 h-4 animate-spin text-red-500" />
+                        ) : (
+                          <Trash2 className="w-4 h-4" />
+                        )}
+                      </button>
+                    </div>
+                    <h3 className="text-lg font-extrabold text-slate-900 leading-tight mb-2">
+                      {project.name}
+                    </h3>
+                    <div className="flex items-center text-xs text-slate-500 font-medium">
+                      <MapPin className="w-3.5 h-3.5 mr-1" />
+                      {project.location}, {project.city}
+                    </div>
                   </div>
-                  <button 
-                    onClick={() => handleDelete(project.id, project.name)}
-                    disabled={deletingId === project.id}
-                    className="p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-lg transition disabled:opacity-50"
-                    title="Delete Project"
-                  >
-                    {deletingId === project.id ? (
-                      <Loader2 className="w-4 h-4 animate-spin text-red-500" />
-                    ) : (
-                      <Trash2 className="w-4 h-4" />
-                    )}
-                  </button>
-                </div>
-                <h3 className="text-lg font-extrabold text-slate-900 leading-tight mb-2">
-                  {project.name}
-                </h3>
-                <div className="flex items-center text-xs text-slate-500 font-medium">
-                  <MapPin className="w-3.5 h-3.5 mr-1" />
-                  {project.location}, {project.city}
-                </div>
-              </div>
-              <div className="bg-slate-50 p-4 flex justify-between items-center">
-                <div>
-                  <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Est. Price</div>
-                  <div className="text-sm font-extrabold text-[#16c47f] mt-0.5">
-                    {project.price_range || "N/A"}
+                  <div className="bg-slate-50 p-4 flex justify-between items-center">
+                    <div>
+                      <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Est. Price</div>
+                      <div className="text-sm font-extrabold text-[#16c47f] mt-0.5">
+                        {project.price_range || "N/A"}
+                      </div>
+                    </div>
+                    <div className="flex space-x-2">
+                      <button 
+                        onClick={() => openFollowersModal(project.id, project.name)}
+                        className="px-3 py-1.5 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-650 rounded-lg text-xs font-bold transition flex items-center space-x-1"
+                      >
+                        <Users className="w-3.5 h-3.5 text-indigo-500" />
+                        <span>Followers</span>
+                      </button>
+                      <Link
+                        href={`/builder/inventory?project_id=${project.id}`}
+                        className="px-3 py-1.5 bg-white border border-slate-200 hover:border-indigo-300 text-indigo-600 rounded-lg text-xs font-bold transition flex items-center justify-center"
+                      >
+                        View Units
+                      </Link>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="flex flex-col sm:flex-row items-start sm:items-center w-full p-4 gap-4">
+                  <div className="flex-1 w-full">
+                    <div className="flex items-center space-x-2 mb-1">
+                      <span className="px-2 py-1 bg-indigo-50 text-indigo-600 rounded text-[9px] font-bold uppercase tracking-wide">
+                        {project.type}
+                      </span>
+                      <h3 className="text-lg font-extrabold text-slate-900 leading-tight truncate">
+                        {project.name}
+                      </h3>
+                    </div>
+                    <div className="flex items-center text-xs text-slate-500 font-medium">
+                      <MapPin className="w-3.5 h-3.5 mr-1 shrink-0" />
+                      <span className="truncate">{project.location}, {project.city}</span>
+                      <span className="mx-2 text-slate-300 hidden sm:inline">•</span>
+                      <span className="text-[10px] text-slate-400 font-semibold shrink-0 hidden sm:inline">{timeAgo(project.created_at)}</span>
+                    </div>
+                  </div>
+                  
+                  <div className="sm:px-6 sm:border-l sm:border-slate-100 flex-shrink-0 w-full sm:w-auto flex sm:flex-col justify-between sm:justify-center items-center sm:items-start">
+                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">Est. Price</div>
+                    <div className="text-sm font-extrabold text-[#16c47f] sm:mt-0.5">
+                      {project.price_range || "N/A"}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center space-x-2 sm:border-l sm:border-slate-100 sm:pl-6 w-full sm:w-auto justify-between sm:justify-start pt-2 sm:pt-0 border-t sm:border-t-0 border-slate-100">
+                    <div className="flex space-x-2">
+                      <button 
+                        onClick={() => openFollowersModal(project.id, project.name)}
+                        className="px-3 py-1.5 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-650 rounded-lg text-xs font-bold transition flex items-center space-x-1"
+                      >
+                        <Users className="w-3.5 h-3.5 text-indigo-500" />
+                        <span className="hidden sm:inline">Followers</span>
+                      </button>
+                      <Link
+                        href={`/builder/inventory?project_id=${project.id}`}
+                        className="px-3 py-1.5 bg-white border border-slate-200 hover:border-indigo-300 text-indigo-600 rounded-lg text-xs font-bold transition flex items-center justify-center"
+                      >
+                        View Units
+                      </Link>
+                    </div>
+                    <button 
+                      onClick={() => handleDelete(project.id, project.name)}
+                      disabled={deletingId === project.id}
+                      className="p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-500 rounded-lg transition disabled:opacity-50 ml-auto"
+                      title="Delete Project"
+                    >
+                      {deletingId === project.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin text-red-500" />
+                      ) : (
+                        <Trash2 className="w-4 h-4" />
+                      )}
+                    </button>
                   </div>
                 </div>
-                <div className="flex space-x-2">
-                  <button 
-                    onClick={() => openFollowersModal(project.id, project.name)}
-                    className="px-3 py-1.5 bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-650 rounded-lg text-xs font-bold transition flex items-center space-x-1"
-                  >
-                    <Users className="w-3.5 h-3.5 text-indigo-500" />
-                    <span>Followers</span>
-                  </button>
-                  <Link
-                    href={`/builder/inventory?project_id=${project.id}`}
-                    className="px-3 py-1.5 bg-white border border-slate-200 hover:border-indigo-300 text-indigo-600 rounded-lg text-xs font-bold transition flex items-center justify-center"
-                  >
-                    View Units
-                  </Link>
-                </div>
-              </div>
+              )}
             </div>
           ))}
         </div>

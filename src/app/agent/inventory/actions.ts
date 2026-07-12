@@ -50,6 +50,7 @@ export interface ProjectDetail {
   floorplans: { name: string; size: string; rooms: string }[];
   pricing: { configuration: string; size: string; price: string }[];
   units: Unit[];
+  brochureUrl?: string;
 }
 
 const PROJECTS_MOCK: Record<string, ProjectDetail> = {
@@ -409,7 +410,8 @@ export async function getAgentInventoryProjectDetail(projectId: string): Promise
       ],
       floorplans,
       pricing,
-      units: mappedUnits
+      units: mappedUnits,
+      brochureUrl: pd.brochureUrl || pd.brochure_url || "https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"
     };
   } catch (err) {
     console.error("Error in getAgentInventoryProjectDetail:", err);
