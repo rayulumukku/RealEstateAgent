@@ -1687,7 +1687,19 @@ export async function POST(req: NextRequest) {
     }
 
     // 19. MY FOLLOWING PROJECTS
-    if (commandLower === "my projects" || commandLower === "following projects" || commandLower === "projects i follow") {
+    const isMyProjects = 
+      commandLower.startsWith("my projects") || 
+      commandLower.startsWith("following projects") || 
+      commandLower.startsWith("projects i follow") ||
+      commandLower === "projects" ||
+      commandLower.startsWith("projects ");
+
+    if (isMyProjects) {
+      const filterQuery = commandLower
+        .replace(/my projects|following projects|projects i follow|projects/g, "")
+        .replace(/\bin\b/g, "")
+        .trim();
+
       let invitations: any[] | null = null;
       let invitesErr = null;
       try {
@@ -1710,7 +1722,23 @@ export async function POST(req: NextRequest) {
               title: "New Project: Skyline Heights",
               location: "Kokapet",
               date: "30th May 2026",
-              description: "Premium project launch."
+              description: "Premium high-rise apartments."
+            }
+          },
+          {
+            events: {
+              title: "New Project: Green Meadows",
+              location: "Gachibowli",
+              date: "15th June 2026",
+              description: "Premium villa plots."
+            }
+          },
+          {
+            events: {
+              title: "New Project: Palm Breeze",
+              location: "Kompally",
+              date: "10th July 2026",
+              description: "Luxury duplex villas."
             }
           }
         ];
@@ -1727,10 +1755,57 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ status: "success", reply: replyEmpty });
       }
 
-      let replyMsg = `🏢 *Projects You're Following* (${projectInvites.length})\n\n`;
-      projectInvites.forEach((inv, idx) => {
+      // If no filter is specified
+      if (!filterQuery) {
+        const replyFilterPrompt = `🏢 *My Projects Directory*\n\n` +
+          `You follow *${projectInvites.length} projects*.\n` +
+          `To prevent showing a long list, please specify a filter by replying with:\n` +
+          `• *projects [location]* (e.g., _"projects kokapet"_)\n` +
+          `• *projects [type]* (e.g., _"projects flats"_, _"projects plots"_, _"projects villas"_)\n` +
+          `• *projects all* (to list all followed projects)`;
+        await sendOutboundReply(replyFilterPrompt);
+        return NextResponse.json({ status: "success", reply: replyFilterPrompt });
+      }
+
+      const isAll = filterQuery === "all";
+      let filtered = projectInvites;
+
+      if (!isAll) {
+        filtered = projectInvites.filter(inv => {
+          const title = (inv.events?.title || "").toLowerCase();
+          const location = (inv.events?.location || "").toLowerCase();
+          const description = (inv.events?.description || "").toLowerCase();
+          const q = filterQuery.toLowerCase();
+
+          // Check for type match keywords
+          let typeMatch = false;
+          if (q === "flats" || q === "flat" || q === "apartment" || q === "apartments" || q === "south flats") {
+            typeMatch = title.includes("heights") || description.includes("flat") || description.includes("apartment");
+          } else if (q === "plots" || q === "plot" || q === "meadows") {
+            typeMatch = title.includes("meadows") || description.includes("plot") || description.includes("layout");
+          } else if (q === "villas" || q === "villa" || q === "breeze") {
+            typeMatch = title.includes("villa") || title.includes("breeze") || description.includes("villa") || description.includes("duplex");
+          }
+
+          return title.includes(q) || location.includes(q) || typeMatch;
+        });
+      }
+
+      if (filtered.length === 0) {
+        const replyEmpty = `🤖 Bot: ❌ No followed projects match your filter "${filterQuery}".\n\n` +
+          `Try replying with:\n` +
+          `• _"projects kokapet"_\n` +
+          `• _"projects flats"_\n` +
+          `• _"projects all"_`;
+        await sendOutboundReply(replyEmpty);
+        return NextResponse.json({ status: "success", reply: replyEmpty });
+      }
+
+      const listHeader = isAll ? "All Followed Projects" : `Followed Projects matching "${filterQuery}"`;
+      let replyMsg = `🏢 *${listHeader}* (${filtered.length})\n\n`;
+      filtered.forEach((inv, idx) => {
         const title = inv.events?.title?.replace("New Project: ", "") || "Unknown";
-        replyMsg += `${idx + 1}. 🏗️ *${title}*\n   📍 ${inv.events?.location || "N/A"}\n\n`;
+        replyMsg += `${idx + 1}. 🏗️ *${title}*\n   📍 Location: ${inv.events?.location || "N/A"}\n\n`;
       });
       await sendOutboundReply(replyMsg.trim());
       return NextResponse.json({ status: "success", reply: replyMsg.trim() });
