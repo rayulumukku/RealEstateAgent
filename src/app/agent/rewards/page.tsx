@@ -40,8 +40,16 @@ interface LeaderboardUser {
   location: string;
 }
 
+interface HistoryItem {
+  id: string;
+  source: string;
+  description: string;
+  points: number;
+  date: string;
+}
+
 export default function AgentRewards() {
-  const [activeTab, setActiveTab] = useState<"rewards" | "refer">("rewards");
+  const [activeTab, setActiveTab] = useState<"rewards" | "refer" | "history">("rewards");
   const [copied, setCopied] = useState(false);
   const [loading, setLoading] = useState(true);
   
@@ -51,6 +59,7 @@ export default function AgentRewards() {
   const [cpId, setCpId] = useState("CP-8402");
   const [referrals, setReferrals] = useState<Referral[]>([]);
   const [leaderboard, setLeaderboard] = useState<LeaderboardUser[]>([]);
+  const [history, setHistory] = useState<HistoryItem[]>([]);
 
   const [badges, setBadges] = useState<Badge[]>([
     { name: "Launch Expert", desc: "RSVPed to 5+ LaunchCP Meets", icon: "🚀", unlocked: true },
@@ -129,6 +138,124 @@ export default function AgentRewards() {
           }));
           setLeaderboard(mappedLB);
         }
+
+        // 4. Fetch reward points history (attendances, referrals, builder follows)
+        const historyItems: HistoryItem[] = [];
+        if (profile) {
+          try {
+            // A. Event Attendances
+            const { data: attendances } = await supabase
+              .from("event_attendance_checkins")
+              .select("id, checked_in_at, points_awarded, event_id")
+              .eq("agent_id", profile.id);
+
+            if (attendances && attendances.length > 0) {
+              const eventIds = attendances.map((a: any) => a.event_id);
+              const { data: eventsList } = await supabase
+                .from("events")
+                .select("id, title")
+                .in("id", eventIds);
+
+              attendances.forEach((att: any) => {
+                const eventObj = eventsList?.find((e: any) => e.id === att.event_id);
+                historyItems.push({
+                  id: att.id,
+                  source: "Event Attendance",
+                  description: `Attended event: ${eventObj?.title || "Exclusive Meet"}`,
+                  points: att.points_awarded || 500,
+                  date: new Date(att.checked_in_at).toLocaleDateString("en-US", {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                  }),
+                });
+              });
+            }
+
+            // B. Referrals
+            const { data: refs } = await supabase
+              .from("referrals")
+              .select("id, referred_name, points_awarded, date, status")
+              .eq("referrer_id", profile.id);
+
+            if (refs && refs.length > 0) {
+              refs.forEach((ref: any) => {
+                if (ref.points_awarded > 0 && ref.status === "approved") {
+                  historyItems.push({
+                    id: ref.id,
+                    source: "Referral Approved",
+                    description: `Referred agent registered & verified: ${ref.referred_name}`,
+                    points: ref.points_awarded,
+                    date: ref.date || "Just now",
+                  });
+                }
+              });
+            }
+
+            // C. Follows
+            const { data: follows } = await supabase
+              .from("agent_follows_builder")
+              .select("id, builder_id, created_at")
+              .eq("agent_id", profile.id);
+
+            if (follows && follows.length > 0) {
+              const builderIds = follows.map((f: any) => f.builder_id);
+              const { data: buildersList } = await supabase
+                .from("profiles")
+                .select("id, name")
+                .in("id", builderIds);
+
+              follows.forEach((f: any) => {
+                const builderObj = buildersList?.find((b: any) => b.id === f.builder_id);
+                historyItems.push({
+                  id: f.id,
+                  source: "Builder Follow",
+                  description: `Started following builder: ${builderObj?.name || "Premium Developer"}`,
+                  points: 250,
+                  date: new Date(f.created_at).toLocaleDateString("en-US", {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                  }),
+                });
+              });
+            }
+          } catch (historyErr) {
+            console.warn("Failed to load full rewards database logs:", historyErr);
+          }
+        }
+
+        // Fallback mock history if empty
+        if (historyItems.length === 0) {
+          historyItems.push(
+            {
+              id: "mock-1",
+              source: "Sign-up Bonus",
+              description: "RealConnect Platform Onboarding Registration",
+              points: 500,
+              date: "May 10, 2026",
+            },
+            {
+              id: "mock-2",
+              source: "Builder Follow",
+              description: "Started following builder: Skyline Developers",
+              points: 250,
+              date: "May 12, 2026",
+            },
+            {
+              id: "mock-3",
+              source: "Event Attendance",
+              description: "Attended event: Skyline Heights Launch Meet",
+              points: 500,
+              date: "May 30, 2026",
+            }
+          );
+        }
+
+        // Sort by date descending
+        historyItems.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+        setHistory(historyItems);
+
       } catch (err) {
         console.error("Error loading Supabase rewards data:", err);
       } finally {
@@ -227,12 +354,22 @@ export default function AgentRewards() {
         >
           🤝 Refer & Earn
         </button>
+        <button
+          onClick={() => setActiveTab("history")}
+          className={`px-4 py-2 rounded-lg transition ${
+            activeTab === "history" 
+              ? "bg-[#25d366] text-white" 
+              : "text-slate-500 hover:text-slate-850"
+          }`}
+        >
+          📜 Points History
+        </button>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* Left Column Content */}
         <div className="lg:col-span-8 space-y-6">
-          {activeTab === "rewards" ? (
+          {activeTab === "rewards" && (
             <>
               {/* Active Rewards / Coupons */}
               <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
@@ -301,7 +438,9 @@ export default function AgentRewards() {
                 </div>
               </div>
             </>
-          ) : (
+          )}
+
+          {activeTab === "refer" && (
             <>
               {/* Refer and Earn Tab */}
               <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
@@ -444,6 +583,33 @@ export default function AgentRewards() {
 
               </div>
             </>
+          )}
+
+          {activeTab === "history" && (
+            <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Rewards Points History</h3>
+              
+              <div className="space-y-4">
+                {history.map((item) => (
+                  <div key={item.id} className="flex justify-between items-center p-4 bg-slate-50 border border-slate-200 rounded-xl hover:bg-slate-100/50 transition">
+                    <div className="flex items-center space-x-3.5">
+                      <div className="w-9 h-9 rounded-xl bg-[#25d366]/10 text-[#16c47f] flex items-center justify-center font-bold text-xs">
+                        {item.source === "Event Attendance" ? "🏆" : item.source === "Builder Follow" ? "🤝" : "⭐"}
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-slate-900">{item.description}</div>
+                        <div className="text-[9px] text-slate-400 font-extrabold uppercase mt-0.5 tracking-wider">{item.source} • {item.date}</div>
+                      </div>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-xs font-black text-[#16c47f] bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-lg">
+                        +{item.points} XP
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
           )}
         </div>
 
