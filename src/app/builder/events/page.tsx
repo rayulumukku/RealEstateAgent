@@ -26,6 +26,16 @@ interface Event {
   created_at: string;
 }
 
+function timeAgo(dateStr: string) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 export default function BuilderEventsHistory() {
   const [loading, setLoading] = useState(true);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -43,22 +53,19 @@ export default function BuilderEventsHistory() {
     setLoadingFollowers(true);
     setFollowersSearch("");
     try {
-      const res = await getFollowersForEntity(id, type, name);
-      if (res.ok && res.followers) {
+      const res = await getFollowersForEntity(id, type);
+      if (res.success && res.followers) {
         setFollowersList(res.followers);
       } else {
-        alert(res.error || "Failed to load followers.");
+        setFollowersList([]);
       }
     } catch (err) {
       console.error("Error loading followers:", err);
+      setFollowersList([]);
     } finally {
       setLoadingFollowers(false);
     }
   }
-
-  useEffect(() => {
-    loadData();
-  }, []);
 
   async function loadData() {
     setLoading(true);
@@ -116,15 +123,10 @@ export default function BuilderEventsHistory() {
     }
   }
 
-  function timeAgo(dateStr: string) {
-    const diff = Date.now() - new Date(dateStr).getTime();
-    const mins = Math.floor(diff / 60000);
-    if (mins < 60) return `${mins}m ago`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h ago`;
-    const days = Math.floor(hours / 24);
-    return `${days}d ago`;
-  }
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadData();
+  }, []);
 
   function formatDate(dateStr: string) {
     return new Date(dateStr).toLocaleDateString("en-IN", {

@@ -572,7 +572,7 @@ export default function AgentRewards() {
                         {referrals.length === 0 && (
                           <tr>
                             <td colSpan={4} className="py-8 text-center text-slate-400 font-semibold">
-                              You haven't referred any agents yet. Share your link to get started!
+                              {"You haven't referred any agents yet. Share your link to get started!"}
                             </td>
                           </tr>
                         )}

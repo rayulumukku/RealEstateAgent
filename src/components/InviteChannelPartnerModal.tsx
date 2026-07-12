@@ -36,11 +36,7 @@ export default function InviteChannelPartnerModal({ isOpen, onClose, existingCon
   const [sending, setSending] = useState(false);
   const [sentSuccess, setSentSuccess] = useState(false);
 
-  useEffect(() => {
-    if (isOpen) {
-      fetchFilteredAgents();
-    }
-  }, [isOpen, selectedLocations, recipientFilter]);
+
 
   async function fetchFilteredAgents() {
     setIsLoadingAgents(true);
@@ -79,6 +75,14 @@ export default function InviteChannelPartnerModal({ isOpen, onClose, existingCon
       setIsLoadingAgents(false);
     }
   }
+
+  useEffect(() => {
+    if (isOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      fetchFilteredAgents();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, selectedLocations, recipientFilter]);
 
   const toggleLocation = (loc: string) => {
     setSelectedLocations((prev) =>
@@ -175,7 +179,7 @@ export default function InviteChannelPartnerModal({ isOpen, onClose, existingCon
               <div>
                 <h3 className="text-xl font-extrabold text-slate-800">Invitations Sent!</h3>
                 <p className="text-sm text-slate-500 font-medium mt-1">
-                  We've broadcasted the channel partner invitation to {selectedAgentIds.size} agents.
+                  {"We've broadcasted the channel partner invitation to "}{selectedAgentIds.size}{" agents."}
                 </p>
               </div>
             </div>
@@ -351,7 +355,7 @@ export default function InviteChannelPartnerModal({ isOpen, onClose, existingCon
                   className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 rounded-xl py-2.5 px-3 text-slate-800 outline-none text-sm font-medium transition"
                 />
                 <p className="text-[10px] text-slate-500 font-semibold italic">
-                  Points credited to agent's profile immediately upon accepting the invitation.
+                  {"Points credited to agent's profile immediately upon accepting the invitation."}
                 </p>
               </div>
 
@@ -366,7 +370,7 @@ export default function InviteChannelPartnerModal({ isOpen, onClose, existingCon
                   className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 rounded-xl py-2 px-3 text-slate-800 outline-none text-sm font-medium transition"
                 />
                 <p className="text-[10px] text-slate-500 font-semibold italic">
-                  Note: The bot will automatically append "Reply Yes to accept, or No to decline." to the end of your message.
+                  {"Note: The bot will automatically append \"Reply Yes to accept, or No to decline.\" to the end of your message."}
                 </p>
               </div>
 

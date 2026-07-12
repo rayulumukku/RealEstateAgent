@@ -405,19 +405,19 @@ export default function AgentDirectory() {
                           <div className="text-center">
                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Active Channel Partners</p>
                             <p className="text-xl font-black text-indigo-650 mt-1">
-                              {Math.floor(Math.random() * 8) + 2} {/* Mock stat */}
+                              {((agent.name.charCodeAt(0) || 0) % 8) + 2} {/* Deterministic mock stat */}
                             </p>
                           </div>
                           <div className="text-center border-l border-r border-slate-200">
                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Events Attended</p>
                             <p className="text-xl font-black text-emerald-600 mt-1">
-                              {Math.floor(Math.random() * 15) + 5} {/* Mock stat */}
+                              {((agent.name.charCodeAt(1) || 0) % 15) + 5} {/* Deterministic mock stat */}
                             </p>
                           </div>
                           <div className="text-center">
                             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Brochures Downloaded</p>
                             <p className="text-xl font-black text-amber-600 mt-1">
-                              {Math.floor(Math.random() * 30) + 10} {/* Mock stat */}
+                              {((agent.name.charCodeAt(2) || 0) % 30) + 10} {/* Deterministic mock stat */}
                             </p>
                           </div>
                         </div>
