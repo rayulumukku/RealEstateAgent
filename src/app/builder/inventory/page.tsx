@@ -512,12 +512,13 @@ export default function BuilderInventoryPage() {
                     <th className="px-4 py-3 text-left w-10">
                       <input 
                         type="checkbox"
-                        checked={selectedUnits.length > 0 && selectedUnits.length === filteredUnits.length}
+                        checked={filteredUnits.length > 0 && filteredUnits.every(u => selectedUnits.includes(u.id))}
                         onChange={(e) => {
+                          const visibleIds = filteredUnits.map(u => u.id);
                           if (e.target.checked) {
-                            setSelectedUnits(filteredUnits.map(u => u.id));
+                            setSelectedUnits(prev => Array.from(new Set([...prev, ...visibleIds])));
                           } else {
-                            setSelectedUnits([]);
+                            setSelectedUnits(prev => prev.filter(id => !visibleIds.includes(id)));
                           }
                         }}
                         className="rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer w-3.5 h-3.5"
