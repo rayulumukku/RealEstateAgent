@@ -267,6 +267,76 @@ export default function BuilderEventsHistory() {
               </button>
             </div>
 
+            {/* Poll Breakdown Summary */}
+            {!loadingFollowers && followersList.length > 0 && (() => {
+              const total = followersList.length;
+              const accepted = followersList.filter(f => f.status === "accepted").length;
+              const declined = followersList.filter(f => f.status === "declined").length;
+              const attended = followersList.filter(f => f.status === "attended").length;
+              const pending = followersList.filter(f => f.status === "pending" || !f.status).length;
+
+              return (
+                <div className="bg-slate-50 border-b border-slate-200 p-5 space-y-4">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-slate-400">Response Poll Breakdown</span>
+                    <span className="text-[10px] font-extrabold text-slate-900 uppercase tracking-wider bg-slate-200 px-2 py-0.5 rounded-full">{total} Targeted</span>
+                  </div>
+                  
+                  {/* Progress Bar Poll */}
+                  <div className="w-full h-3 bg-slate-200 rounded-full flex overflow-hidden">
+                    {attended > 0 && (
+                      <div 
+                        style={{ width: `${(attended / total) * 100}%` }} 
+                        className="bg-amber-405 h-full transition-all" 
+                        title={`Attended: ${attended} (${Math.round((attended / total) * 100)}%)`}
+                      />
+                    )}
+                    {accepted > 0 && (
+                      <div 
+                        style={{ width: `${(accepted / total) * 100}%` }} 
+                        className="bg-emerald-500 h-full transition-all" 
+                        title={`Accepted (Rsvp Yes): ${accepted} (${Math.round((accepted / total) * 100)}%)`}
+                      />
+                    )}
+                    {declined > 0 && (
+                      <div 
+                        style={{ width: `${(declined / total) * 100}%` }} 
+                        className="bg-rose-500 h-full transition-all" 
+                        title={`Declined (Rsvp No): ${declined} (${Math.round((declined / total) * 100)}%)`}
+                      />
+                    )}
+                    {pending > 0 && (
+                      <div 
+                        style={{ width: `${(pending / total) * 100}%` }} 
+                        className="bg-slate-305 h-full transition-all" 
+                        title={`Pending: ${pending} (${Math.round((pending / total) * 100)}%)`}
+                      />
+                    )}
+                  </div>
+
+                  {/* Legend Grid */}
+                  <div className="grid grid-cols-4 gap-2 text-center text-[10px] font-bold">
+                    <div className="bg-amber-50 border border-amber-200 rounded-xl p-2.5 text-amber-800 flex flex-col justify-center items-center shadow-sm">
+                      <div className="text-[8px] uppercase text-amber-600 font-extrabold">🏆 Attended</div>
+                      <div className="text-base font-black mt-0.5 text-amber-700">{attended}</div>
+                    </div>
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-2.5 text-emerald-800 flex flex-col justify-center items-center shadow-sm">
+                      <div className="text-[8px] uppercase text-emerald-600 font-extrabold">🟢 Accepted</div>
+                      <div className="text-base font-black mt-0.5 text-emerald-700">{accepted}</div>
+                    </div>
+                    <div className="bg-rose-50 border border-rose-200 rounded-xl p-2.5 text-rose-800 flex flex-col justify-center items-center shadow-sm">
+                      <div className="text-[8px] uppercase text-rose-600 font-extrabold">🔴 Declined</div>
+                      <div className="text-base font-black mt-0.5 text-rose-700">{declined}</div>
+                    </div>
+                    <div className="bg-slate-100 border border-slate-200 rounded-xl p-2.5 text-slate-700 flex flex-col justify-center items-center shadow-sm">
+                      <div className="text-[8px] uppercase text-slate-500 font-extrabold">⏳ Pending</div>
+                      <div className="text-base font-black mt-0.5 text-slate-600">{pending}</div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Search */}
             <div className="p-4 border-b border-slate-100 bg-white">
               <div className="relative">
