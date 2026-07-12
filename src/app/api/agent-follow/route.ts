@@ -23,8 +23,35 @@ export async function POST(req: NextRequest) {
     if (!target) return NextResponse.json({ error: "Builder not found." }, { status: 404 });
 
     if (action === "follow") {
-      const { error } = await supabaseAdmin.from("agent_follows_builder").upsert({ agent_id: session.sub, builder_id }, { onConflict: "agent_id,builder_id" });
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      // Check if already following to prevent duplicate rewards trigger
+      const { data: alreadyFollowing } = await supabaseAdmin
+        .from("agent_follows_builder")
+        .select("id")
+        .eq("agent_id", session.sub)
+        .eq("builder_id", builder_id)
+        .maybeSingle();
+
+      if (!alreadyFollowing) {
+        const { error } = await supabaseAdmin.from("agent_follows_builder").upsert({ agent_id: session.sub, builder_id }, { onConflict: "agent_id,builder_id" });
+        if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+        // Fetch current points and award 250 XP bonus rewards
+        const bonusPoints = 250;
+        const { data: profile } = await supabaseAdmin
+          .from("profiles")
+          .select("points")
+          .eq("id", session.sub)
+          .single();
+
+        const currentPoints = profile?.points || 0;
+        await supabaseAdmin
+          .from("profiles")
+          .update({ points: currentPoints + bonusPoints })
+          .eq("id", session.sub);
+
+        return NextResponse.json({ ok: true, action: "follow", bonusAwarded: bonusPoints });
+      }
+
       return NextResponse.json({ ok: true, action: "follow" });
     } else {
       const { error } = await supabaseAdmin.from("agent_follows_builder").delete().eq("agent_id", session.sub).eq("builder_id", builder_id);
