@@ -481,7 +481,9 @@ export default function WhatsAppSimulationWidget() {
               { label: "📁 Get Brochure", cmd: "Send ProjectName brochure", autoSubmit: false },
               { label: "📋 My Leads", cmd: "my leads", autoSubmit: true },
               { label: "📍 Leads in Kokapet", cmd: "my leads in kokapet", autoSubmit: true },
-              { label: "💰 Leads under 2Cr", cmd: "my leads under 2cr", autoSubmit: true }
+              { label: "💰 Leads under 2Cr", cmd: "my leads under 2cr", autoSubmit: true },
+              { label: "🏆 My Rewards", cmd: "my rewards", autoSubmit: true },
+              { label: "🏢 View Inventory", cmd: "inventory", autoSubmit: true }
             ].map((item, idx) => (
               <button
                 key={idx}
