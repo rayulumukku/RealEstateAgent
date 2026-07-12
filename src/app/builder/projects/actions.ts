@@ -28,6 +28,7 @@ export interface FollowerInfo {
   agency_name: string;
   location: string;
   followed_at: string;
+  status?: string;
 }
 
 export async function getFollowersForEntity(
@@ -54,14 +55,65 @@ export async function getFollowersForEntity(
       }
     }
 
-    // Query rsvps for the targetEventId
+    if (entityType === "event" || entityType === "campaign") {
+      // Query event_invitations (which contains accepted, declined, pending, and responded_at)
+      let invitations = null;
+      let error = null;
+      try {
+        const { data, error: dbErr } = await supabaseAdmin
+          .from("event_invitations")
+          .select("agent_id, status, responded_at, profiles:profiles(name, phone, agency_name, location)")
+          .eq("event_id", targetEventId);
+        invitations = data;
+        error = dbErr;
+      } catch (err) {
+        error = err;
+      }
+
+      // Query checkins to see who attended
+      let checkins = null;
+      try {
+        const { data } = await supabaseAdmin
+          .from("event_attendance_checkins")
+          .select("agent_id")
+          .eq("event_id", targetEventId);
+        checkins = data;
+      } catch (e) {}
+      const checkinAgentIds = new Set(checkins?.map((c: any) => c.agent_id) || []);
+
+      if (error) {
+        console.error("Error fetching event invitations:", error);
+        return { ok: false, error: (error as any).message };
+      }
+
+      const followersList = (invitations || []).map((i: any) => {
+        const hasAttended = checkinAgentIds.has(i.agent_id);
+        let statusString = i.status;
+        if (hasAttended) {
+          statusString = "attended";
+        }
+        return {
+          agent_id: i.agent_id,
+          name: i.profiles?.name || "Agent",
+          phone: i.profiles?.phone || "",
+          agency_name: i.profiles?.agency_name || "Independent",
+          location: i.profiles?.location || "",
+          followed_at: i.responded_at || i.created_at || new Date().toISOString(),
+          status: statusString
+        };
+      });
+
+      return { ok: true, followers: followersList };
+    }
+
+    // Default project follow query (using project_follows or similar)
     const { data: rsvps, error } = await supabaseAdmin
       .from("rsvps")
       .select("agent_id, created_at, profiles:profiles(name, phone, agency_name, location)")
       .eq("event_id", targetEventId);
 
     if (error) {
-      console.error("Error fetching followers:", error);
+      console.error("Error fetching project followers:", error);
       return { ok: false, error: error.message };
     }
 
@@ -72,6 +124,7 @@ export async function getFollowersForEntity(
       agency_name: r.profiles?.agency_name || "Independent",
       location: r.profiles?.location || "",
       followed_at: r.created_at,
+      status: "accepted"
     }));
 
     return { ok: true, followers: followersList };

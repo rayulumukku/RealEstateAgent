@@ -143,15 +143,25 @@ export async function launchCampaignAction(
     };
     const metaString = `\n\n<!-- TARGET: ${JSON.stringify(targetMeta)} -->`;
 
+    // Generate unique attendance code (like SUN7089)
+    const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+    const prefix = Array.from({ length: 3 }, () => letters[Math.floor(Math.random() * letters.length)]).join("");
+    const digits = Math.floor(1000 + Math.random() * 9000);
+    const attendanceCode = `${prefix}${digits}`;
+
     // 2. Insert into events table so it shows up in agent's launches tab
-    const { error: eventError } = await supabaseAdmin
+    const { data: newEvent, error: eventError } = await supabaseAdmin
       .from("events")
       .insert({
         title: name,
         date,
         location,
         description: `${description}${metaString}`,
-      });
+        attendance_code: attendanceCode,
+        attendance_points: 500,
+      })
+      .select("id")
+      .single();
 
     if (eventError) {
         console.error("Event insert error:", eventError);
@@ -166,9 +176,25 @@ export async function launchCampaignAction(
     if (agents && agents.length > 0) {
       for (const agent of agents) {
         if (!agent.phone) continue;
+
+        // Insert a pending invitation for the agent
+        if (newEvent) {
+          try {
+            await supabaseAdmin
+              .from("event_invitations")
+              .insert({
+                event_id: newEvent.id,
+                agent_id: agent.id,
+                status: "pending"
+              });
+          } catch (invErr) {
+            console.warn("Failed to insert pending event invitation:", invErr);
+          }
+        }
+
         const cleanPhone = agent.phone.replace(/\D/g, "");
         const finalPhone = cleanPhone.length === 10 ? `91${cleanPhone}` : cleanPhone;
-        const messageText = `*${name}*\n\n${description}\n\nDate: ${date}\nLocation: ${location}`;
+        const messageText = `*${name}*\n\n${description}\n\nDate: ${date}\nLocation: ${location}\n\nReply *YES* to accept or *NO* to decline.`;
 
         let status = 0;
         let errMsg: string | null = null;

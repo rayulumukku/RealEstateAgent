@@ -3,6 +3,8 @@ import crypto from "crypto";
 import { supabaseAdmin as supabase } from "@/lib/supabaseAdmin";
 import { HYDERABAD_LOCATIONS } from "@/lib/hyderabadLocations";
 
+const mockedCheckins = new Set<string>();
+
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
@@ -403,8 +405,98 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "success", reply: replyMsg });
     }
 
-    // Handle Yes/No for Channel Partner Invitations
+    // Handle Yes/No for Event Invitations or Channel Partner Invitations
     if (commandLower === "yes" || commandLower === "no") {
+      // 1. Check for pending event invitations
+      let pendingEventInvites: any[] | null = null;
+      let eventInvitesErr = null;
+      try {
+        const { data, error } = await supabase
+          .from("event_invitations")
+          .select("*, events(title, location, date, description, attendance_code)")
+          .eq("agent_id", profile.id)
+          .eq("status", "pending")
+          .order("created_at", { ascending: false });
+        pendingEventInvites = data;
+        eventInvitesErr = error;
+      } catch (err) {
+        eventInvitesErr = err;
+      }
+
+      // Offline Sandbox Fallback
+      if ((!pendingEventInvites || pendingEventInvites.length === 0 || eventInvitesErr) && isFromSimulator) {
+        pendingEventInvites = [
+          {
+            id: "mock-invite-id",
+            event_id: "mock-event-id",
+            agent_id: profile.id,
+            status: "pending",
+            events: {
+              title: "Skyline Heights Launch",
+              location: "Kokapet, Hyderabad",
+              date: "30th May 2026, 11:00 AM",
+              description: "Exclusive launch event.",
+              attendance_code: "SUN7089"
+            }
+          }
+        ];
+      }
+
+      if (pendingEventInvites && pendingEventInvites.length > 0) {
+        const invite = pendingEventInvites[0];
+        const event = invite.events;
+
+        if (commandLower === "yes") {
+          // Accept the event invitation
+          try {
+            await supabase
+              .from("event_invitations")
+              .update({ status: "accepted", responded_at: new Date().toISOString() })
+              .eq("id", invite.id);
+
+            // Also upsert into rsvps table to show up in dashboard and getAgentEvents
+            await supabase
+              .from("rsvps")
+              .upsert(
+                {
+                  event_id: invite.event_id,
+                  agent_id: profile.id,
+                  qr_code: `EVENT-${invite.event_id.slice(0, 8)}-${profile.id.slice(0, 8)}`
+                },
+                { onConflict: "event_id,agent_id" }
+              );
+          } catch (dbErr) {
+            console.warn("Failed to update event invite status in DB:", dbErr);
+          }
+
+          const replyMsg = `🎉 *Invitation Accepted!*\n\nYou have successfully registered for the event:\n🏆 *${event?.title || "Webinar"}*\n📅 Date: *${event?.date || "TBD"}*\n📍 Venue: *${event?.location || "Online"}*\n\nSee you there!`;
+          await sendOutboundReply(replyMsg);
+          return NextResponse.json({ status: "success", reply: replyMsg });
+        } else {
+          // Decline the event invitation
+          try {
+            await supabase
+              .from("event_invitations")
+              .update({ status: "declined", responded_at: new Date().toISOString() })
+              .eq("id", invite.id);
+
+            // Delete from rsvps table if exists
+            await supabase
+              .from("rsvps")
+              .delete()
+              .eq("event_id", invite.event_id)
+              .eq("agent_id", profile.id);
+          } catch (dbErr) {
+            console.warn("Failed to delete event invite status in DB:", dbErr);
+          }
+
+          const replyMsg = `🤖 *Understood.*\n\nYou have declined the invitation to *${event?.title || "the event"}*. Thank you for letting us know!`;
+          await sendOutboundReply(replyMsg);
+          return NextResponse.json({ status: "success", reply: replyMsg });
+        }
+      }
+
+      // 2. Fallback to Channel Partner Invitations
       // Find pending invitations for this agent
       const { data: invites, error: invitesErr } = await supabase
         .from("channel_partners")
@@ -444,9 +536,6 @@ export async function POST(req: NextRequest) {
           await sendOutboundReply(replyMsg);
           return NextResponse.json({ status: "success", reply: replyMsg });
         }
-      } else {
-        // If they just typed yes or no but have no pending invites, maybe they were answering something else?
-        // Let's just ignore or fall through. If they explicitly sent "aa yes", it falls through.
       }
     }
 
@@ -1599,12 +1688,33 @@ export async function POST(req: NextRequest) {
 
     // 19. MY FOLLOWING PROJECTS
     if (commandLower === "my projects" || commandLower === "following projects" || commandLower === "projects i follow") {
-      // agent_invitations links agents to events/projects via accepted status
-      const { data: invitations } = await supabase
-        .from("agent_invitations")
-        .select("*, events(title, location, date, description)")
-        .eq("agent_id", profile.id)
-        .eq("status", "accepted");
+      let invitations: any[] | null = null;
+      let invitesErr = null;
+      try {
+        const { data, error } = await supabase
+          .from("event_invitations")
+          .select("*, events(title, location, date, description)")
+          .eq("agent_id", profile.id)
+          .eq("status", "accepted");
+        invitations = data;
+        invitesErr = error;
+      } catch (err) {
+        invitesErr = err;
+      }
+
+      // Offline Sandbox Fallback
+      if ((!invitations || invitations.length === 0 || invitesErr) && isFromSimulator) {
+        invitations = [
+          {
+            events: {
+              title: "New Project: Skyline Heights",
+              location: "Kokapet",
+              date: "30th May 2026",
+              description: "Premium project launch."
+            }
+          }
+        ];
+      }
 
       // Filter for project-type events (title starts with "New Project:")
       const projectInvites = (invitations || []).filter(inv =>
@@ -1628,11 +1738,33 @@ export async function POST(req: NextRequest) {
 
     // 20. MY EVENTS / RSVPs
     if (commandLower === "my events" || commandLower === "my rsvps" || commandLower === "accepted events") {
-      const { data: invitations } = await supabase
-        .from("agent_invitations")
-        .select("*, events(title, location, date, description)")
-        .eq("agent_id", profile.id)
-        .eq("status", "accepted");
+      let invitations: any[] | null = null;
+      let invitesErr = null;
+      try {
+        const { data, error } = await supabase
+          .from("event_invitations")
+          .select("*, events(title, location, date, description)")
+          .eq("agent_id", profile.id)
+          .eq("status", "accepted");
+        invitations = data;
+        invitesErr = error;
+      } catch (err) {
+        invitesErr = err;
+      }
+
+      // Offline Sandbox Fallback
+      if ((!invitations || invitations.length === 0 || invitesErr) && isFromSimulator) {
+        invitations = [
+          {
+            events: {
+              title: "Skyline Heights Launch",
+              location: "Kokapet, Hyderabad",
+              date: "30th May 2026, 11:00 AM",
+              description: "Exclusive launch event."
+            }
+          }
+        ];
+      }
 
       // Filter for non-project events (actual meets/launches/webinars)
       const eventInvites = (invitations || []).filter(inv =>
@@ -1681,25 +1813,141 @@ export async function POST(req: NextRequest) {
 
     // 22. DASHBOARD QUICK STATS
     if (commandLower === "dashboard" || commandLower === "summary" || commandLower === "my stats") {
-      const [leadsRes, remindersRes, eventsRes] = await Promise.all([
-        supabase.from("leads").select("id, status").eq("agent_id", profile.id),
-        supabase.from("reminders").select("id").eq("agent_id", profile.id).eq("is_completed", false),
-        supabase.from("agent_invitations").select("id").eq("agent_id", profile.id).eq("status", "accepted"),
-      ]);
+      let leadsResData: any[] = [];
+      let remindersResData: any[] = [];
+      let eventsResData: any[] = [];
 
-      const leads = leadsRes.data || [];
-      const hotLeads = leads.filter(l => ["interested", "site_visit", "negotiation"].includes(l.status)).length;
+      try {
+        const [leadsRes, remindersRes, eventsRes] = await Promise.all([
+          supabase.from("leads").select("id, status").eq("agent_id", profile.id),
+          supabase.from("reminders").select("id").eq("agent_id", profile.id).eq("is_completed", false),
+          supabase.from("event_invitations").select("id").eq("agent_id", profile.id).eq("status", "accepted"),
+        ]);
+        leadsResData = leadsRes.data || [];
+        remindersResData = remindersRes.data || [];
+        eventsResData = eventsRes.data || [];
+      } catch (err) {
+        console.warn("Database error during quick stats:", err);
+      }
+
+      // Offline Sandbox Fallback
+      if (isFromSimulator && (leadsResData.length === 0 && remindersResData.length === 0 && eventsResData.length === 0)) {
+        leadsResData = [
+          { status: "site_visit" },
+          { status: "interested" }
+        ];
+        remindersResData = [1, 2];
+        eventsResData = [1];
+      }
+
+      const leads = leadsResData;
+      const hotLeads = leads.filter((l: any) => l && typeof l === "object" && ["interested", "site_visit", "negotiation"].includes(l.status)).length;
       const replyMsg = `📊 *Your Dashboard Summary*\n\n` +
         `👤 *${profile.name}* | CP ID: ${profile.cp_id || "Pending"}\n` +
         `⭐ XP: *${profile.points || 0} pts*\n\n` +
         `📋 *Leads*\n` +
         `• Total: *${leads.length}*\n` +
         `• Hot Leads: *${hotLeads}*\n\n` +
-        `⏰ *Pending Reminders:* ${remindersRes.data?.length || 0}\n` +
-        `📅 *Events Accepted:* ${eventsRes.data?.length || 0}\n\n` +
+        `⏰ *Pending Reminders:* ${remindersResData.length}\n` +
+        `📅 *Events Accepted:* ${eventsResData.length}\n\n` +
         `👉 Type _"aa help"_ for all commands.`;
       await sendOutboundReply(replyMsg);
       return NextResponse.json({ status: "success", reply: replyMsg });
+    }
+
+    // 23. EVENT ATTENDANCE BY CODE (e.g. SUN7089)
+    const isAttendanceCode = /^[A-Z]{3}\d{4}$/.test(commandText.trim().toUpperCase());
+    if (isAttendanceCode) {
+      const inputCode = commandText.trim().toUpperCase();
+      let matchedEvent: any = null;
+      let matchedEventErr = null;
+      
+      try {
+        const { data, error } = await supabase
+          .from("events")
+          .select("*")
+          .eq("attendance_code", inputCode)
+          .maybeSingle();
+        matchedEvent = data;
+        matchedEventErr = error;
+      } catch (err) {
+        matchedEventErr = err;
+      }
+
+      // Offline Sandbox Fallback
+      if ((!matchedEvent || matchedEventErr) && isFromSimulator && inputCode === "SUN7089") {
+        matchedEvent = {
+          id: "mock-event-id",
+          title: "Skyline Heights Launch",
+          attendance_code: "SUN7089",
+          attendance_points: 500
+        };
+      }
+
+      if (matchedEvent) {
+        // Check if already checked in
+        let alreadyCheckedIn = false;
+        try {
+          const { data: checkin } = await supabase
+            .from("event_attendance_checkins")
+            .select("id")
+            .eq("event_id", matchedEvent.id)
+            .eq("agent_id", profile.id)
+            .maybeSingle();
+          if (checkin) {
+            alreadyCheckedIn = true;
+          }
+        } catch (checkinErr) {
+          // If query throws (e.g., table doesn't exist yet/offline), use in-memory mock set
+          const checkinKey = `${matchedEvent.id}-${profile.id}`;
+          if (mockedCheckins.has(checkinKey)) {
+            alreadyCheckedIn = true;
+          }
+        }
+
+        if (alreadyCheckedIn) {
+          const replyMsg = `🤖 Bot: ⚠️ You have already checked in for *${matchedEvent.title}* and claimed your rewards.`;
+          await sendOutboundReply(replyMsg);
+          return NextResponse.json({ status: "success", reply: replyMsg });
+        }
+
+        // Perform Check-in and award rewards
+        const awardPoints = matchedEvent.attendance_points || 500;
+        try {
+          // Log checkin
+          await supabase
+            .from("event_attendance_checkins")
+            .insert({
+              event_id: matchedEvent.id,
+              agent_id: profile.id,
+              points_awarded: awardPoints
+            });
+
+          // Update agent's profile points
+          await supabase
+            .from("profiles")
+            .update({ points: (profile.points || 0) + awardPoints })
+            .eq("id", profile.id);
+        } catch (dbErr) {
+          console.warn("Database checkin log failed, tracking in-memory:", dbErr);
+          const checkinKey = `${matchedEvent.id}-${profile.id}`;
+          mockedCheckins.add(checkinKey);
+        }
+
+        // Update profile in-memory points for the reply
+        profile.points = (profile.points || 0) + awardPoints;
+
+        const replyMsg = `🏆 *Attendance Checked-In!*\n\n` +
+          `Thank you for attending *${matchedEvent.title}*!\n` +
+          `You have been successfully checked in. *+${awardPoints} XP* has been added to your profile.\n\n` +
+          `⭐ Current Balance: *${profile.points} XP*`;
+        await sendOutboundReply(replyMsg);
+        return NextResponse.json({ status: "success", reply: replyMsg });
+      } else {
+        const replyMsg = `🤖 Bot: ❌ Invalid attendance code *${inputCode}*. Please check the code and try again.`;
+        await sendOutboundReply(replyMsg);
+        return NextResponse.json({ status: "success", reply: replyMsg });
+      }
     }
 
     // Default/Fallback help menu
