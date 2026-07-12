@@ -306,7 +306,7 @@ export default function BuilderEventsHistory() {
                     {attended > 0 && (
                       <div 
                         style={{ width: `${(attended / total) * 100}%` }} 
-                        className="bg-amber-405 h-full transition-all" 
+                        className="bg-amber-400 h-full transition-all" 
                         title={`Attended: ${attended} (${Math.round((attended / total) * 100)}%)`}
                       />
                     )}
@@ -327,7 +327,7 @@ export default function BuilderEventsHistory() {
                     {pending > 0 && (
                       <div 
                         style={{ width: `${(pending / total) * 100}%` }} 
-                        className="bg-slate-305 h-full transition-all" 
+                        className="bg-slate-300 h-full transition-all" 
                         title={`Pending: ${pending} (${Math.round((pending / total) * 100)}%)`}
                       />
                     )}

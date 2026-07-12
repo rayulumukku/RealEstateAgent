@@ -348,7 +348,7 @@ export default function InviteChannelPartnerModal({ isOpen, onClose, existingCon
                   value={rewardPoints}
                   onChange={(e) => setRewardPoints(Math.max(0, parseInt(e.target.value) || 0))}
                   placeholder="e.g. 500"
-                  className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 rounded-xl py-2.5 px-3 text-slate-850 outline-none text-sm font-medium transition"
+                  className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 rounded-xl py-2.5 px-3 text-slate-800 outline-none text-sm font-medium transition"
                 />
                 <p className="text-[10px] text-slate-500 font-semibold italic">
                   Points credited to agent's profile immediately upon accepting the invitation.
