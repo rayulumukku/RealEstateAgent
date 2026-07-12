@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { MessageSquare, X } from "lucide-react";
+import { MessageSquare, X, Calendar } from "lucide-react";
 import { getNewSimulatedMessages } from "@/app/auth/actions";
 import { HYDERABAD_LOCATIONS } from "@/lib/hyderabadLocations";
 
@@ -19,7 +19,17 @@ export default function WhatsAppSimulationWidget() {
   const [regInterested, setRegInterested] = useState<string[]>([]);
   const [isLocDropdownOpen, setIsLocDropdownOpen] = useState(false);
   const [isPropDropdownOpen, setIsPropDropdownOpen] = useState(false);
+  
+  // Add Lead Form State
+  const [showAddLeadForm, setShowAddLeadForm] = useState(false);
+  const [addLeadName, setAddLeadName] = useState("");
+  const [addLeadPhone, setAddLeadPhone] = useState("");
+  const [addLeadLocation, setAddLeadLocation] = useState("");
+  const [addLeadBudget, setAddLeadBudget] = useState("");
+
+  const [showDocsMenu, setShowDocsMenu] = useState(false);
   const chatBodyRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Auto-scroll chat to bottom
   useEffect(() => {
@@ -143,6 +153,94 @@ export default function WhatsAppSimulationWidget() {
       setChatHistory(prev => [...prev, botReply]);
     } catch (err: any) {
       setChatHistory(prev => [...prev, `🤖 Bot: ❌ Failed to dispatch webhook: ${err.message}`]);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    const fileName = file.name;
+    const isImage = file.type.startsWith("image/");
+    const msgType = isImage ? "image" : "document";
+
+    setChatHistory(prev => [...prev, `👤 You: [Sent a ${msgType}: ${fileName}]`]);
+
+    try {
+      let rawPhone = localStorage.getItem("agentsapp_logged_in_phone");
+      if (!rawPhone) {
+        let simPhone = localStorage.getItem("agentsapp_sim_phone");
+        if (!simPhone) {
+          const randomNum = Math.floor(10000000 + Math.random() * 90000000);
+          simPhone = `+91 99${randomNum}`;
+          localStorage.setItem("agentsapp_sim_phone", simPhone);
+        }
+        rawPhone = simPhone;
+      }
+      
+      const cleanPhone = rawPhone.replace(/\D/g, "");
+
+      // Actually upload the file to Supabase via our new simulator upload API
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("phone", cleanPhone);
+
+      const uploadRes = await fetch("/api/upload-simulator", {
+        method: "POST",
+        body: formData,
+      });
+      const uploadData = await uploadRes.json();
+
+      if (!uploadRes.ok || !uploadData.url) {
+        throw new Error(uploadData.error || "Upload failed");
+      }
+
+      const fileUrl = uploadData.url;
+
+      const messagePayload: any = {
+        from: cleanPhone,
+        id: `wamid.sandbox_${Date.now()}`,
+        timestamp: Math.floor(Date.now() / 1000).toString(),
+        type: msgType
+      };
+
+      if (isImage) {
+        messagePayload.image = { link: fileUrl, caption: fileName };
+      } else {
+        messagePayload.document = { link: fileUrl, filename: fileName };
+      }
+
+      const userName = localStorage.getItem("agentsapp_logged_in_user") || "Visitor";
+
+      const response = await fetch("/api/whatsapp/webhook", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          object: "whatsapp_business_account",
+          entry: [{
+            id: "sandbox-entry",
+            changes: [{
+              field: "messages",
+              value: {
+                messaging_product: "whatsapp",
+                metadata: { display_phone_number: "919999999999", phone_number_id: "bot-phone-id" },
+                contacts: [{ profile: { name: userName }, wa_id: cleanPhone }],
+                messages: [messagePayload]
+              }
+            }]
+          }]
+        })
+      });
+
+      const data = await response.json();
+      const rawReply = data.reply || "File processed successfully.";
+      const botReply = rawReply.startsWith("🤖") ? rawReply : `🤖 Bot: ${rawReply}`;
+      setChatHistory(prev => [...prev, botReply]);
+
+      // Reset file input
+      e.target.value = '';
+    } catch (err: any) {
+      setChatHistory(prev => [...prev, `🤖 Bot: ❌ Failed to send file: ${err.message}`]);
     }
   };
 
@@ -309,21 +407,81 @@ export default function WhatsAppSimulationWidget() {
                 </div>
               </div>
             )}
+
+            {showAddLeadForm && (
+              <div className="flex flex-col items-start mt-2">
+                <div className="max-w-[95%] bg-white text-slate-800 rounded-lg rounded-tl-none border border-slate-200 p-3 shadow-sm w-full space-y-2.5">
+                  <div className="font-bold text-xs text-[#25d366] pb-1 border-b border-slate-100">Add New Lead</div>
+                  
+                  <div className="w-full">
+                    <label className="text-[10px] text-slate-500 font-bold mb-0.5 block">Lead Name</label>
+                    <input type="text" placeholder="e.g. Ravi" value={addLeadName} onChange={e => setAddLeadName(e.target.value)} className="w-full border border-slate-200 rounded-md p-1.5 text-xs outline-none focus:border-[#25d366]" />
+                  </div>
+                  
+                  <div className="w-full">
+                    <label className="text-[10px] text-slate-500 font-bold mb-0.5 block">Phone Number</label>
+                    <input type="text" placeholder="e.g. 9876543210" value={addLeadPhone} onChange={e => setAddLeadPhone(e.target.value)} className="w-full border border-slate-200 rounded-md p-1.5 text-xs outline-none focus:border-[#25d366]" />
+                  </div>
+                  
+                  <div className="flex space-x-2 w-full">
+                    <div className="flex-1">
+                      <label className="text-[10px] text-slate-500 font-bold mb-0.5 block">Location</label>
+                      <input type="text" placeholder="e.g. Kokapet" value={addLeadLocation} onChange={e => setAddLeadLocation(e.target.value)} className="w-full border border-slate-200 rounded-md p-1.5 text-xs outline-none focus:border-[#25d366]" />
+                    </div>
+                    <div className="flex-1">
+                      <label className="text-[10px] text-slate-500 font-bold mb-0.5 block">Budget</label>
+                      <input type="text" placeholder="e.g. 2Cr" value={addLeadBudget} onChange={e => setAddLeadBudget(e.target.value)} className="w-full border border-slate-200 rounded-md p-1.5 text-xs outline-none focus:border-[#25d366]" />
+                    </div>
+                  </div>
+
+                  <div className="flex space-x-2 pt-1.5">
+                    <button 
+                      onClick={() => {
+                        if (!addLeadName || !addLeadPhone || !addLeadLocation || !addLeadBudget) {
+                          alert("Name, Phone, Location, and Budget are all required");
+                          return;
+                        }
+                        if (addLeadPhone.replace(/\D/g, "").length < 10) {
+                          alert("Please enter a valid 10-digit phone number");
+                          return;
+                        }
+                        setShowAddLeadForm(false);
+                        const cmd = `add lead ${addLeadName} phone ${addLeadPhone} location ${addLeadLocation} budget ${addLeadBudget}`;
+                        setChatInput(cmd);
+                        setTimeout(() => document.getElementById("chatbot-submit-btn")?.click(), 50);
+                        
+                        // Reset form
+                        setAddLeadName("");
+                        setAddLeadPhone("");
+                        setAddLeadLocation("");
+                        setAddLeadBudget("");
+                      }}
+                      className="bg-[#25d366] text-white px-3 py-1.5 rounded font-bold hover:bg-[#16c47f] flex-1 text-center transition"
+                    >
+                      Add Lead
+                    </button>
+                    <button onClick={() => setShowAddLeadForm(false)} className="bg-slate-100 text-slate-600 px-3 py-1.5 rounded font-bold hover:bg-slate-200 transition">
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Quick Suggestion Chips */}
           <div className="bg-[#efeae2] px-3 pb-2.5 flex space-x-1.5 overflow-x-auto shrink-0 scrollbar-thin select-none">
             {[
               { label: "ℹ️ Help", cmd: "help", autoSubmit: true },
-              { label: "🆕 Register", cmd: "aa Register [Your Name] phone [Your Phone Number] agency [Your Agency Name] location [Area] interested in [Property Types]", autoSubmit: false },
-              { label: "🆕 Add Lead", cmd: "add lead [Name] phone [Number] location [Area] budget [Price]", autoSubmit: false },
-              { label: "🔍 Search", cmd: "Search [Location/BHK/Type]", autoSubmit: false },
-              { label: "⏰ Set Reminder", cmd: "Remind me to call [Name] time [Date/Time]", autoSubmit: false },
-              { label: "📁 Get Brochure", cmd: "Send [Project Name] brochure", autoSubmit: false },
-              { label: "🚀 Upcoming Launches", cmd: "Upcoming launches", autoSubmit: true },
-              { label: "🎥 Register Webinar", cmd: "Register webinar", autoSubmit: true },
+              { label: "🆕 Add Lead", cmd: "add a client ", autoSubmit: false },
+              { label: "🔍 Search Properties", cmd: "search for a 3bhk flat in kompally", autoSubmit: true },
+              { label: "🏢 Search Projects", cmd: "find projects by myhome", autoSubmit: true },
+              { label: "⏰ Reminders", cmd: "reminders", autoSubmit: true },
+              { label: "⏰ Set Reminder", cmd: "Remind me to call  time ", autoSubmit: false },
+              { label: "📁 Get Brochure", cmd: "Send ProjectName brochure", autoSubmit: false },
               { label: "📋 My Leads", cmd: "my leads", autoSubmit: true },
-              { label: "⚡ Update Status", cmd: "[Lead Name] site visit", autoSubmit: false }
+              { label: "📍 Leads in Kokapet", cmd: "my leads in kokapet", autoSubmit: true },
+              { label: "💰 Leads under 2Cr", cmd: "my leads under 2cr", autoSubmit: true }
             ].map((item, idx) => (
               <button
                 key={idx}
@@ -331,9 +489,29 @@ export default function WhatsAppSimulationWidget() {
                 onClick={() => {
                   if (item.label.includes("Register") && !item.label.includes("Webinar")) {
                     setShowRegForm(true);
+                    setShowAddLeadForm(false);
                     setTimeout(() => {
                       if (chatBodyRef.current) {
                         chatBodyRef.current.scrollTop = chatBodyRef.current.scrollHeight;
+                      }
+                    }, 50);
+                    return;
+                  }
+
+
+
+                  if (item.label.includes("Set Reminder")) {
+                    setChatInput("Remind me to  time ");
+                    setTimeout(() => {
+                      try {
+                        const picker = document.getElementById("bot-datetime-picker") as HTMLInputElement;
+                        if (picker && typeof picker.showPicker === 'function') {
+                          picker.showPicker();
+                        } else if (picker) {
+                          picker.click();
+                        }
+                      } catch (e) {
+                        console.error(e);
                       }
                     }, 50);
                     return;
@@ -359,13 +537,82 @@ export default function WhatsAppSimulationWidget() {
           </div>
 
           {/* Chat Footer Input */}
-          <form onSubmit={handleSendChat} className="p-2 bg-[#f0f2f5] border-t border-slate-200 flex items-center space-x-2 shrink-0">
+          <form onSubmit={handleSendChat} className="p-2 bg-[#f0f2f5] border-t border-slate-200 flex items-center space-x-2 shrink-0 relative">
+            <input 
+              type="file" 
+              className="hidden" 
+              ref={fileInputRef} 
+              onChange={(e) => {
+                setShowDocsMenu(false);
+                handleFileUpload(e);
+              }}
+              accept="image/*,.pdf,.doc,.docx"
+            />
+            
+            {showDocsMenu && (
+              <div className="absolute bottom-12 left-2 bg-white border border-slate-200 rounded-lg shadow-xl w-40 overflow-hidden z-20 animate-in fade-in slide-in-from-bottom-2">
+                <button 
+                  type="button" 
+                  onClick={() => {
+                    setShowDocsMenu(false);
+                    setChatInput("my docs");
+                    setTimeout(() => document.getElementById("chatbot-submit-btn")?.click(), 50);
+                  }}
+                  className="w-full text-left px-4 py-2.5 text-xs text-slate-700 hover:bg-slate-50 border-b border-slate-100 font-medium"
+                >
+                  📄 View Documents
+                </button>
+                <button 
+                  type="button" 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="w-full text-left px-4 py-2.5 text-xs text-slate-700 hover:bg-slate-50 font-medium"
+                >
+                  📤 Upload File
+                </button>
+              </div>
+            )}
+
+            <button 
+              type="button" 
+              onClick={() => setShowDocsMenu(!showDocsMenu)}
+              className="px-3 h-8 rounded-full bg-white text-slate-600 hover:text-slate-800 text-[11px] font-bold shrink-0 shadow-sm transition border border-slate-200"
+            >
+              Documents
+            </button>
+            <div className="relative shrink-0 flex items-center justify-center">
+              <button 
+                type="button" 
+                title="Pick Date & Time"
+                className="w-8 h-8 rounded-full bg-white text-slate-600 hover:text-slate-800 flex items-center justify-center shadow-sm transition border border-slate-200"
+              >
+                <Calendar className="w-3.5 h-3.5" />
+              </button>
+              <input 
+                id="bot-datetime-picker"
+                type="datetime-local" 
+                title="Pick Date & Time"
+                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (!val) return;
+                  const d = new Date(val);
+                  const formatted = d.toLocaleDateString("en-IN", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true });
+                  if (!chatInput.toLowerCase().includes("time")) {
+                    setChatInput(prev => prev ? `${prev} time ${formatted}` : `Remind me to  time ${formatted}`);
+                  } else {
+                    setChatInput(prev => `${prev.trim()} ${formatted}`);
+                  }
+                  e.target.value = ''; // Reset so they can select the same date again if needed
+                }}
+              />
+            </div>
             <input 
               id="chatbot-input-field"
               type="text"
               placeholder="e.g. add lead Ravi 3BHK"
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
+              onClick={() => setShowDocsMenu(false)}
               className="flex-1 bg-white border border-slate-200 rounded-full py-2 px-3 text-[11px] text-slate-800 outline-none focus:border-[#25d366] transition shadow-inner"
             />
             <button 

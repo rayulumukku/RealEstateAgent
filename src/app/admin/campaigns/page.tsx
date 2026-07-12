@@ -22,7 +22,7 @@ export default function AdminCampaignsMonitor() {
     setLoading(true);
     const res = await getCampaignsAction();
     if (res.ok) {
-      setCampaigns(res.campaigns);
+      setCampaigns(res.campaigns || []);
     } else {
       console.error("Failed to load campaigns:", res.error);
     }
@@ -42,7 +42,7 @@ export default function AdminCampaignsMonitor() {
       campaign.audience_segment || ""
     );
     if (res.ok) {
-      setAgents(res.agents);
+      setAgents(res.agents || []);
     } else {
       console.error("Failed to load campaign details:", res.error);
     }

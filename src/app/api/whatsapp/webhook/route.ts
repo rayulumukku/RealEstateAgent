@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
 import { supabaseAdmin as supabase } from "@/lib/supabaseAdmin";
+import { HYDERABAD_LOCATIONS } from "@/lib/hyderabadLocations";
 
 // -----------------------------------------------------------------------------
 // Helpers
@@ -142,6 +143,30 @@ export async function POST(req: NextRequest) {
       ""
     ).toString().trim();
 
+    // Detect message type and media URLs
+    const msgType = (
+      payload.whatsapp?.type ||
+      payload.data?.message?.type ||
+      payload.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.type ||
+      payload.message?.type ||
+      payload.type ||
+      "text"
+    );
+
+    let mediaUrl = "";
+    let mediaFileName = "";
+    if (msgType === "image" || msgType === "document") {
+      const mediaObj = 
+        payload.whatsapp?.image || payload.whatsapp?.document ||
+        payload.data?.message?.image || payload.data?.message?.document ||
+        payload.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.image ||
+        payload.entry?.[0]?.changes?.[0]?.value?.messages?.[0]?.document ||
+        payload.message?.image || payload.message?.document;
+        
+      mediaUrl = mediaObj?.link || mediaObj?.url || mediaObj?.id || "media_uploaded";
+      mediaFileName = mediaObj?.filename || mediaObj?.name || `${msgType}_file`;
+    }
+
     // Clean surrounding single/double quotes
     if ((textBody.startsWith('"') && textBody.endsWith('"')) || (textBody.startsWith("'") && textBody.endsWith("'"))) {
       textBody = textBody.slice(1, -1).trim();
@@ -161,17 +186,22 @@ export async function POST(req: NextRequest) {
       ""
     ).toString().trim();
 
-    if (!textBody || !fromPhoneRaw) {
-      console.log("Ignored payload: Missing message body or sender phone number.");
+    if (!fromPhoneRaw) {
+      console.log("Ignored payload: Missing sender phone number.");
+      return NextResponse.json({ status: "ignored", message: "Missing phone" });
+    }
+
+    if (!textBody && msgType === "text") {
+      console.log("Ignored payload: Missing message body.");
       await logWhatsappMessage({
         direction: "inbound",
         phone: fromPhoneRaw || null,
         message_type: "system",
         content: textBody || null,
-        error_message: "missing body or phone",
+        error_message: "missing body",
         raw_payload: payload,
       });
-      return NextResponse.json({ status: "ignored", message: "Missing body or phone" });
+      return NextResponse.json({ status: "ignored", message: "Missing body" });
     }
 
     // Detect which BSP/source this payload is from. Used for audit logging.
@@ -210,12 +240,6 @@ export async function POST(req: NextRequest) {
     const isFromSimulator = payload.entry?.[0]?.id === "sandbox-entry" || payload.from === "simulator" || payload.fromPhone === "simulator";
     const hasAaPrefix = lowerText.startsWith("aa ") || lowerText === "aa";
 
-    // If it doesn't match our routing signature, ignore it and let GallaBox's default flows handle it
-    if (!hasAaPrefix && !isFromSimulator) {
-      console.log("Ignored payload: Does not start with 'aa' and not from simulator.");
-      return NextResponse.json({ status: "ignored", message: "Not intended for agentsapp bot" });
-    }
-
     // Strip "aa" prefix to normalize command text for processing
     let commandText = textBody;
     if (lowerText.startsWith("aa ")) {
@@ -224,7 +248,16 @@ export async function POST(req: NextRequest) {
       commandText = "help";
     }
 
-    const commandLower = commandText.toLowerCase();
+    let commandLower = commandText.toLowerCase();
+
+    // Check if the message is a pure "yes" or "no" reply
+    const isYesOrNo = commandLower === "yes" || commandLower === "no";
+
+    // If it doesn't match our routing signature, isn't a yes/no reply, and is not from simulator, ignore it
+    if (!hasAaPrefix && !isFromSimulator && !isYesOrNo && msgType === "text") {
+      console.log("Ignored payload: Does not start with 'aa', isn't yes/no, and not from simulator.");
+      return NextResponse.json({ status: "ignored", message: "Not intended for agentsapp bot" });
+    }
 
     // formattedPhone is already defined above
 
@@ -301,7 +334,97 @@ export async function POST(req: NextRequest) {
       .from("profiles")
       .select("*")
       .eq("phone", formattedPhone)
-      .single();
+      .maybeSingle();
+
+    // Handle Media Uploads (Documents/Images)
+    if (msgType === "image" || msgType === "document") {
+      if (!profile) {
+        await sendOutboundReply(`🤖 Bot: We received a file, but your phone number is not registered. Please register first by typing *aa register [Name]*`);
+        return NextResponse.json({ status: "success", reply: "Unregistered user uploaded file" });
+      }
+
+      // If the agent is in a pending verification state, log to verification_docs
+      if (profile.status === "pending" || profile.status === "docs_required" || profile.status === "rejected") {
+        await supabase.from("verification_docs").insert([{
+          agent_id: profile.id,
+          doc_type: msgType,
+          file_url: mediaUrl,
+          file_name: mediaFileName,
+          status: "pending"
+        }]);
+        await supabase.from("profiles").update({ status: "docs_uploaded" }).eq("id", profile.id);
+        const replyMsg = `🤖 Bot: 📄 *Verification File Received!*\nThank you for uploading your document. Our admin team will review it shortly. Your status is now *Docs Uploaded*.`;
+        await sendOutboundReply(replyMsg.replace(/\\n/g, "\n"));
+        return NextResponse.json({ status: "success", reply: replyMsg });
+      }
+
+      // Otherwise, save it as a regular document for the agent
+      const { error: insertError } = await supabase.from("documents").insert([{
+        agent_id: profile.id,
+        type: "Other", // Use standard type to avoid enum/constraint errors
+        url: mediaUrl,
+        name: mediaFileName,
+        send_count: 0,
+        view_count: 0
+      }]);
+
+      if (insertError) {
+        console.error("Failed to insert document:", insertError);
+        await sendOutboundReply(`🤖 Bot: ❌ Failed to save your document: ${insertError.message}`);
+        return NextResponse.json({ status: "error", reply: "Insert failed" });
+      }
+
+      const replyMsg = `🤖 Bot: 📄 *File Received!*\nWe've securely saved your document to your "My Documents" vault.`;
+      await sendOutboundReply(replyMsg.replace(/\\n/g, "\n"));
+      return NextResponse.json({ status: "success", reply: replyMsg });
+    }
+
+    // Handle Yes/No for Channel Partner Invitations
+    if (commandLower === "yes" || commandLower === "no") {
+      // Find pending invitations for this agent
+      const { data: invites, error: invitesErr } = await supabase
+        .from("channel_partners")
+        .select("builder_id, status")
+        .eq("agent_id", profile.id)
+        .eq("status", "invited");
+
+      if (!invitesErr && invites && invites.length > 0) {
+        // Just process the first pending invitation
+        const invite = invites[0];
+        
+        if (commandLower === "yes") {
+          await supabase
+            .from("channel_partners")
+            .update({ status: "connected" })
+            .eq("agent_id", profile.id)
+            .eq("builder_id", invite.builder_id);
+            
+          // Reward agent
+          await supabase
+            .from("profiles")
+            .update({ points: (profile.points || 0) + 100 })
+            .eq("id", profile.id);
+
+          const replyMsg = `🎉 *Awesome!*\n\nYou are now an official Channel Partner.\n\n💰 We have credited *100 bonus credits* to your account!`;
+          await sendOutboundReply(replyMsg);
+          return NextResponse.json({ status: "success", reply: replyMsg });
+        } else {
+          // They said no
+          await supabase
+            .from("channel_partners")
+            .update({ status: "rejected" })
+            .eq("agent_id", profile.id)
+            .eq("builder_id", invite.builder_id);
+            
+          const replyMsg = `🤖 *Understood.*\n\nYou have declined the Channel Partner invitation. Let us know if you change your mind in the future.`;
+          await sendOutboundReply(replyMsg);
+          return NextResponse.json({ status: "success", reply: replyMsg });
+        }
+      } else {
+        // If they just typed yes or no but have no pending invites, maybe they were answering something else?
+        // Let's just ignore or fall through. If they explicitly sent "aa yes", it falls through.
+      }
+    }
 
     // Handle Registration Commands
     if (commandLower.startsWith("register") || commandLower.includes("register")) {
@@ -327,7 +450,7 @@ export async function POST(req: NextRequest) {
 
         let interestedArr: string[] = [];
         if (regInterested) {
-           interestedArr = regInterested.split(",").map(i => i.trim());
+           interestedArr = regInterested.split(",").map((i: string) => i.trim());
         }
 
         const cleanInputPhone = regPhone.replace(/\D/g, "");
@@ -336,7 +459,7 @@ export async function POST(req: NextRequest) {
           : formattedPhone;
 
         let dbError = null;
-        let generatedId = profile?.cp_id || `CP-${Math.floor(1000 + Math.random() * 9000)}`;
+        let generatedId = profile?.cp_id || null;
 
         if (profile) {
           // UPDATE existing profile
@@ -361,7 +484,7 @@ export async function POST(req: NextRequest) {
               agency_name: regAgency,
               role: "agent",
               status: "pending",
-              cp_id: generatedId,
+              cp_id: null,
               points: 500,
               referrals_count: 0,
               location: regLocation,
@@ -378,12 +501,12 @@ export async function POST(req: NextRequest) {
         } else {
           const locText = regLocation ? `\n📍 Location: *${regLocation}*` : "";
           const intText = regInterested ? `\n🏡 Interested: *${regInterested}*` : "";
-          const replyOk = `🎉 *Registration ${profile ? "Updated" : "Successful"}!*\n\n👤 Name: *${regName}*\n🏢 Agency: *${regAgency}*\n📞 Phone: *${finalPhoneForDb}*${locText}${intText}\n🆔 CP ID: *${generatedId}*\n💰 Welcome Reward: *+500 XP*\n\n⚠️ *Action Required:*\nPlease reply to this message with your *RERA Document, Aadhar, and PAN* to get verified.\n\nYour account is currently *pending approval* by an admin.`;
+          const replyOk = `🎉 *Registration ${profile ? "Updated" : "Successful"}!*\n\n👤 Name: *${regName}*\n🏢 Agency: *${regAgency}*\n📞 Phone: *${finalPhoneForDb}*${locText}${intText}\n💰 Welcome Reward: *+500 XP*\n\n⚠️ *Action Required:*\nPlease reply to this message with your *RERA Document, Aadhar, and PAN* to get verified.\n\nYour account is currently *pending approval* by an admin.`;
           await sendOutboundReply(replyOk);
           return NextResponse.json({ status: "success", reply: replyOk });
         }
       } else {
-        const replyFormat = `🤖 *AgentsApp Onboarding*:\n\nTo register as a Channel Partner directly on WhatsApp, please reply in this format:\n\n_"aa Register [Your Name] phone [Your Phone Number] agency [Agency Name] location [Your City] interested in [Property Types]"_`;
+        const replyFormat = `🤖 *AgentsApp Onboarding*:\n\nTo register as a Channel Partner directly on WhatsApp, please reply in this format:\n\n_"aa Register Your Name phone 9999999999 agency Agency Name location Your City interested in Property Types"_`;
         await sendOutboundReply(replyFormat);
         return NextResponse.json({ status: "success", reply: replyFormat });
       }
@@ -391,7 +514,7 @@ export async function POST(req: NextRequest) {
 
     if (!profile) {
       // If not a registration command, ask them to register
-      const replyRegPrompt = `🤖 *Welcome to AgentsApp!*\n\nIt looks like your phone number is not registered yet as a Channel Partner.\n\nTo create your account instantly on WhatsApp, please reply with:\n\n_"aa Register [Your Name] phone [Your Phone Number] agency [Your Agency Name]"_`;
+      const replyRegPrompt = `🤖 *Welcome to AgentsApp!*\n\nIt looks like your phone number is not registered yet as a Channel Partner.\n\nTo create your account instantly on WhatsApp, please reply with:\n\n_"aa Register Your Name phone 9999999999 agency Your Agency Name"_`;
       await sendOutboundReply(replyRegPrompt);
       return NextResponse.json({ status: "success", reply: replyRegPrompt });
     }
@@ -442,15 +565,15 @@ export async function POST(req: NextRequest) {
           `👋 Welcome *${profile.name}* (${profile.agency_name || "Agent"})!\n` +
           `🆔 CP ID: *${profile.cp_id || "Pending"}*\n\n` +
           `📋 *Leads*\n` +
-          `1. _"aa Add [Name] looking for [BHK]"_ — add lead\n` +
+          `1. _"aa Add Name looking for BHK"_ — add lead\n` +
           `2. _"aa My leads"_ — view all your leads\n` +
-          `3. _"aa Search [Name]"_ — find a specific lead\n` +
-          `4. _"aa [Name] site visit"_ — update lead status\n\n` +
+          `3. _"aa Search Name"_ — find a specific lead\n` +
+          `4. _"aa Name site visit"_ — update lead status\n\n` +
           `⏰ *Reminders*\n` +
           `5. _"aa Remind me to call [Name] time [date]"_ — set reminder\n` +
           `6. _"aa my reminders"_ — view pending reminders\n\n` +
           `🏢 *Inventory & Projects*\n` +
-          `7. _"aa Search 3BHK Kokapet"_ — search units\n` +
+          `7. _"aa inventory"_ — view available units\n` +
           `8. _"aa brochure [project]"_ — get brochure PDF\n` +
           `9. _"aa my projects"_ — projects you follow\n\n` +
           `📅 *Events*\n` +
@@ -458,7 +581,7 @@ export async function POST(req: NextRequest) {
           `11. _"aa webinars"_ — register for webinars\n` +
           `12. _"aa my events"_ — your accepted RSVPs\n\n` +
           `🏆 *Rewards*\n` +
-          `13. _"aa my points"_ — your XP balance & rank\n` +
+          `13. _"aa rewards"_ — your XP balance & rank\n` +
           `14. _"aa leaderboard"_ — top 10 agents\n` +
           `15. _"aa my referrals"_ — agents you referred\n\n` +
           `👤 *Profile*\n` +
@@ -470,91 +593,186 @@ export async function POST(req: NextRequest) {
       await sendOutboundReply(helpMsg);
       return NextResponse.json({ status: "success", reply: helpMsg });
     }
-
-    // 2. ADD LEAD INTENT (Support: "Add Ravi looking for 3BHK", etc.)
-    if (commandLower.startsWith("add") || commandLower.includes("add lead")) {
-      let leadName = "New Lead";
-      let leadPhone = "9876500000";
-      let leadBudget = "₹1.80 Cr";
-      let leadLoc = "Kokapet";
-      let requirement = "3 BHK";
-
-      // Match "Add [Name] looking for [Req]" or "Add [Name] wanting [Req]"
-      const addLookingMatch = commandText.match(/add\s+([a-zA-Z\s]+)\s+looking\s+for\s+([0-9a-zA-Z\s_]+)/i);
-      if (addLookingMatch) {
-        leadName = addLookingMatch[1].trim();
-        requirement = addLookingMatch[2].trim();
-      } else {
-        // Fallback to original matching
-        const nameMatch = commandText.match(/add\s+(?:lead\s+)?([a-zA-Z\s]+)/i);
-        leadName = nameMatch?.[1]?.replace(/(phone|budget|location|looking|wanting).*/i, "")?.trim() || "New Lead";
+    // --- CONVERSATIONAL STATE MACHINE SETUP ---
+    // Fetch the last outbound message sent by the bot to this phone number
+    let lastBotMessageStr = "";
+    if (formattedPhone) {
+      const { data: lastMsg } = await supabase
+        .from("whatsapp_messages")
+        .select("content")
+        .eq("direction", "outbound")
+        .eq("phone", formattedPhone)
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (lastMsg) {
+        lastBotMessageStr = lastMsg.content;
       }
+    }
 
-      const phoneMatch = commandText.match(/phone\s+([\d\s]+)/i);
-      if (phoneMatch) {
-        leadPhone = phoneMatch[1].replace(/\s+/g, "");
+    // --- CONVERSATIONAL STATE MACHINE: INVENTORY FILTER ---
+    if (lastBotMessageStr.includes("Filter this list?") && lastBotMessageStr.includes("Reply with your preferred location")) {
+      // If the bot just asked them to filter, treat their next message as an inventory query
+      if (!commandLower.includes("inventory")) {
+        commandLower = "inventory " + commandLower;
       }
-      
-      const budgetMatch = commandText.match(/budget\s+([^\s]+)/i);
-      if (budgetMatch) {
-        leadBudget = budgetMatch[1];
+    }
+
+    // --- CONVERSATIONAL STATE MACHINE: LEADS FILTER ---
+    if (lastBotMessageStr.includes("Filter these leads?") && lastBotMessageStr.includes("Reply with a location")) {
+      if (!commandLower.includes("my leads") && !commandLower.includes("show leads")) {
+        commandLower = "my leads " + commandLower;
       }
+    }
 
-      const locMatch = commandText.match(/location\s+([a-zA-Z\s]+)/i);
-      if (locMatch) {
-        leadLoc = locMatch[1].trim();
+    // --- SMART SEARCH: REMINDERS ---
+    if (commandLower === "reminder" || commandLower === "reminders" || commandLower === "my reminders") {
+      const { data: reminders } = await supabase.from("reminders").select("*").eq("agent_id", profile.id).eq("is_completed", false);
+      if (!reminders || reminders.length === 0) {
+        await sendOutboundReply(`🤖 Bot: You have no pending reminders!`);
+        return NextResponse.json({ status: "success" });
       }
+      const rList = reminders.map((r: any) => `⏰ *${r.scheduled_time}*\n${r.title}`).join("\n\n");
+      const rep = `🤖 Bot: Here are your reminders:\n\n${rList}`;
+      await sendOutboundReply(rep);
+      return NextResponse.json({ status: "success" });
+    }
 
-      // Insert lead into Supabase
-      const { data: newLead, error } = await supabase
-        .from("leads")
-        .insert([{
-          agent_id: profile.id,
-          name: leadName,
-          phone: leadPhone,
-          status: "new",
-          requirement: requirement,
-          location: leadLoc,
-          budget: leadBudget,
-          details: {
-            propertyType: "Apartment",
-            aiScore: 85,
-            lastInteraction: "WhatsApp bot logged"
-          }
-        }])
-        .select()
-        .single();
+    // --- SMART SEARCH: PROJECTS ---
+    if (commandLower.startsWith("find projects by ")) {
+       const builderName = commandText.replace(/find projects by /i, "").trim();
+       const { data: builders } = await supabase.from("profiles").select("id, name").eq("role", "builder").ilike("name", `%${builderName}%`);
+       if (!builders || builders.length === 0) {
+          await sendOutboundReply(`🤖 Bot: Could not find any builders matching "${builderName}".`);
+          return NextResponse.json({ status: "success" });
+       }
+       const builderId = builders[0].id;
+       const { data: projs } = await supabase.from("projects").select("*").eq("developer_id", builderId);
+       if (!projs || projs.length === 0) {
+          await sendOutboundReply(`🤖 Bot: Builder ${builders[0].name} has no listed projects.`);
+          return NextResponse.json({ status: "success" });
+       }
+       const pList = projs.map((p: any) => `🏢 *${p.name}*\n📍 ${p.location} | 💰 ${p.price_range}`).join("\n\n");
+       const rep = `🤖 Bot: Projects by ${builders[0].name}:\n\n${pList}`;
+       await sendOutboundReply(rep);
+       return NextResponse.json({ status: "success" });
+    }
 
-      if (error) {
-        console.error("Failed to insert lead via WhatsApp bot:", error);
-        const replyErr = `🤖 Bot: ❌ Failed to add lead to database: ${error.message}`;
-        await sendOutboundReply(replyErr);
-        return NextResponse.json({ status: "error", reply: replyErr });
-      } else {
-        console.log("Successfully logged lead via WhatsApp bot:", newLead);
-        const replyOk = `🤖 Bot: ✅ Lead Added!\n👤 Name: *${leadName}*\n📱 Phone: ${leadPhone}\n📍 Location: ${leadLoc}\n🏠 Req: *${requirement}*\n💰 Budget: ${leadBudget}\n\n(This was inserted in your live Supabase leads table. Close chat to see it!)`;
+    // --- SMART SEARCH: INVENTORY ---
+    if (commandLower.startsWith("search for a ") || commandLower.startsWith("search ")) {
+       const cleanCmd = commandLower.replace("search for a ", "").replace("search ", "");
+       const bhkMatch = cleanCmd.match(/(\d)\s*bhk/i);
+       const typeMatch = cleanCmd.match(/(flat|villa|plot|apartment)/i);
+       const locMatch = cleanCmd.match(/in (.*)/i);
+
+       const bhk = bhkMatch ? bhkMatch[0] : "";
+       let pType = typeMatch ? typeMatch[1].toLowerCase() : "";
+       if (pType === "flat") pType = "apartment";
+       const loc = locMatch ? locMatch[1].trim() : "";
+
+       let q = supabase.from("projects").select("id, name, location");
+       if (loc) q = q.ilike("location", `%${loc}%`);
+       if (pType) q = q.eq("type", pType);
+
+       const { data: projs } = await q;
+       if (!projs || projs.length === 0) {
+          await sendOutboundReply(`🤖 Bot: Could not find any ${pType || "properties"} in ${loc || "that area"}.`);
+          return NextResponse.json({ status: "success" });
+       }
+
+       const pList = projs.map((p: any) => `🏢 *${p.name}* in ${p.location}`).join("\n");
+       const rep = `🤖 Bot: I found these matches:\n\n${pList}`;
+       await sendOutboundReply(rep);
+       return NextResponse.json({ status: "success" });
+    }
+
+    // --- CONVERSATIONAL STATE MACHINE: ADD LEAD ---
+    // State 1: Awaiting Property Type
+    if (lastBotMessageStr.includes("Is ") && lastBotMessageStr.includes(" looking for a flat, villa, or plot?")) {
+      const nameMatch = lastBotMessageStr.match(/Is (.*?) looking for a flat, villa, or plot\?/);
+      if (nameMatch) {
+        const leadName = nameMatch[1];
+        const propertyType = commandText.trim();
+        const replyType = `🤖 Bot: Got it, a ${propertyType}. What is ${leadName}'s budget?`;
+        await sendOutboundReply(replyType);
+        return NextResponse.json({ status: "success", reply: replyType });
+      }
+    }
+
+    // State 2: Awaiting Budget
+    if (lastBotMessageStr.includes("Got it, a ") && lastBotMessageStr.includes("What is ") && lastBotMessageStr.includes("'s budget?")) {
+      const typeMatch = lastBotMessageStr.match(/Got it, a (.*?)\./);
+      const nameMatch = lastBotMessageStr.match(/What is (.*?)'s budget\?/);
+      if (typeMatch && nameMatch) {
+        const propertyType = typeMatch[1];
+        const leadName = nameMatch[1];
+        const budget = commandText.trim();
+
+        const { error } = await supabase
+          .from("leads")
+          .insert([{
+            agent_id: profile.id,
+            name: leadName,
+            status: "new",
+            requirement: propertyType,
+            budget: budget,
+            phone: "+91 00000 00000",
+            details: { aiScore: 85, lastInteraction: "Added via conversational bot" }
+          }]);
+        
+        if (error) {
+           const replyErr = `🤖 Bot: ❌ Failed to add lead: ${error.message}`;
+           await sendOutboundReply(replyErr);
+           return NextResponse.json({ status: "error", reply: replyErr });
+        }
+        
+        const replyOk = `🤖 Bot: ✅ Lead Added!\n👤 Name: *${leadName}*\n🏠 Req: *${propertyType}*\n💰 Budget: *${budget}*\n\n(This was inserted in your live leads table!)`;
         await sendOutboundReply(replyOk);
         return NextResponse.json({ status: "success", reply: replyOk });
       }
-    } 
+    }
+
+    // Entry Point: "add a client sreenivas" or "add lead sreenivas"
+    if (commandLower.startsWith("add a client ") || commandLower.startsWith("add lead ")) {
+      const leadName = commandText.replace(/add a client/i, "").replace(/add lead/i, "").trim();
+      if (!leadName) {
+         const rep = `🤖 Bot: Please provide the client's name. Example: "add a client Sreenivas"`;
+         await sendOutboundReply(rep);
+         return NextResponse.json({ status: "success", reply: rep });
+      }
+      const replyStart = `🤖 Bot: Great! Is ${leadName} looking for a flat, villa, or plot?`;
+      await sendOutboundReply(replyStart);
+      return NextResponse.json({ status: "success", reply: replyStart });
+    }
+
+ 
 
     // 3. SET REMINDER INTENT (Support: "Remind me tomorrow to call Ramesh", etc.)
     if (commandLower.startsWith("remind") || commandLower.includes("remind")) {
-      const match = commandText.match(/remind\s+(?:me\s+)?(?:to\s+)?([a-zA-Z0-9\s,.-]+)\s+time\s+(.*)/i);
-      
       let title = "WhatsApp Follow-up Task";
       let scheduledTime = "Tomorrow, 10:00 AM";
 
-      if (match) {
-        title = match[1].trim();
-        scheduledTime = match[2].trim();
+      // Remove "remind me to "
+      let content = commandText.replace(/^remind\s*(me\s*)?(to\s*)?/i, "").trim();
+      
+      // Look for time indicators at the end of the sentence
+      const timeRegex = /\b(at|on|by|time|tomorrow|today)\b\s*(.*)$/i;
+      const timeMatch = content.match(timeRegex);
+
+      if (timeMatch) {
+         scheduledTime = timeMatch[0].trim();
+         // If "tomorrow call ramesh", the time indicator is at the beginning.
+         // Let's just strip the matched time part from the title.
+         title = content.replace(timeRegex, "").trim();
       } else {
-        // Fallback for simple "Remind me tomorrow"
-        const titleMatch = commandText.match(/remind\s+me\s+(?:to\s+)?(.*)/i);
-        if (titleMatch) {
-          title = titleMatch[1].trim();
-        }
+         title = content;
       }
+
+      if (!title) title = "WhatsApp Follow-up Task";
+      
+      // Strip square brackets if any
+      if (title.startsWith("[") && title.endsWith("]")) title = title.slice(1, -1).trim();
+      if (scheduledTime.startsWith("[") && scheduledTime.endsWith("]")) scheduledTime = scheduledTime.slice(1, -1).trim();
 
       // Find if there is a matching lead to link
       const { data: matchingLeads } = await supabase
@@ -663,19 +881,108 @@ export async function POST(req: NextRequest) {
       commandLower.includes("all leads") || 
       commandLower.includes("hot leads")
     ) {
-      const { data: leads } = await supabase
+      let query = supabase
         .from("leads")
         .select("*")
-        .eq("agent_id", profile.id)
-        .order("created_at", { ascending: false });
+        .eq("agent_id", profile.id);
+
+      // Extract location filter (e.g. "in kokapet", "near banjara hills" or just "kokapet")
+      let locationFilter = "";
+      // 1. Try with preposition prefix (in/near/at)
+      const locMatch = commandLower.match(/(?:in|near|at)\s+([a-z0-9\s]+?)(?:\s+(?:under|below|budget|around|above|over|less than|more than)|$)/);
+      if (locMatch && locMatch[1]) {
+        locationFilter = locMatch[1].trim();
+      } else {
+        // 2. Check if any known location name exists in the command
+        const matchedLoc = HYDERABAD_LOCATIONS.find(loc => 
+          commandLower.includes(loc.toLowerCase())
+        );
+        if (matchedLoc) {
+          locationFilter = matchedLoc;
+        } else {
+          // 3. Fallback: if the command was just a word like "kokapet" and not containing other commands, extract the remainder
+          const locPart = commandLower
+            .replace(/my leads|show leads|list leads|all leads|hot leads/g, "")
+            .replace(/(under|below|budget|around|above|over|less than|more than)\s+([0-9\.]+\s*(?:cr|l|c|k|crore|lakhs?))/g, "")
+            .replace(/[0-9\.]+\s*(?:cr|l|c|k|crore|lakhs?)/g, "")
+            .trim();
+          if (locPart && locPart.length > 2 && !["leads", "show", "list", "all", "hot"].includes(locPart)) {
+            locationFilter = locPart;
+          }
+        }
+      }
+
+      if (locationFilter) {
+        query = query.ilike("location", `%${locationFilter}%`);
+      }
+
+      // Extract budget filter (e.g. "under 2cr", "budget 50l", or just "2cr")
+      let budgetFilter = "";
+      let budgetKeyword = "";
+      const budgetMatchWithKeyword = commandLower.match(/(under|below|budget|around|above|over|less than|more than)\s+([0-9\.]+\s*(?:cr|l|c|k|crore|lakhs?))/);
+      if (budgetMatchWithKeyword && budgetMatchWithKeyword[2]) {
+        budgetKeyword = budgetMatchWithKeyword[1].trim();
+        budgetFilter = budgetMatchWithKeyword[2].trim();
+      } else {
+        const budgetMatchDirect = commandLower.match(/([0-9\.]+\s*(?:cr|l|c|k|crore|lakhs?))/);
+        if (budgetMatchDirect && budgetMatchDirect[1]) {
+          budgetFilter = budgetMatchDirect[1].trim();
+          budgetKeyword = "around"; // default fallback behavior
+        }
+      }
+
+      let { data: leads } = await query.order("created_at", { ascending: false });
+
+      if (leads && leads.length > 0) {
+        if (budgetFilter) {
+          const parseBudgetToLakhs = (budgetStr: string) => {
+            if (!budgetStr) return null;
+            const numMatch = budgetStr.match(/([0-9\.]+)/);
+            if (!numMatch) return null;
+            let num = parseFloat(numMatch[1]);
+            const lowerStr = budgetStr.toLowerCase();
+            if (lowerStr.includes('cr') || (lowerStr.includes('c') && !lowerStr.includes('loc'))) {
+              num = num * 100;
+            } else if (lowerStr.includes('k')) {
+              num = num / 100;
+            }
+            return num;
+          };
+
+          const userBudgetLakhs = parseBudgetToLakhs(budgetFilter);
+          if (userBudgetLakhs !== null) {
+            const isUnder = ["under", "below", "less than"].includes(budgetKeyword);
+            const isOver = ["above", "over", "more than"].includes(budgetKeyword);
+
+            leads = leads.filter(l => {
+              if (!l.budget) return false;
+              const leadBudgetLakhs = parseBudgetToLakhs(l.budget);
+              if (leadBudgetLakhs === null) return false;
+              
+              if (isUnder) return leadBudgetLakhs <= userBudgetLakhs;
+              if (isOver) return leadBudgetLakhs >= userBudgetLakhs;
+              return leadBudgetLakhs >= userBudgetLakhs * 0.8 && leadBudgetLakhs <= userBudgetLakhs * 1.2;
+            });
+          }
+        }
+      }
 
       if (!leads || leads.length === 0) {
-        const replyEmpty = "🤖 Bot: You don't have any leads registered yet. Add one by typing:\n\"aa Add lead [Name] phone [No]\"";
+        let replyEmpty = "🤖 Bot: You don't have any leads registered yet. Add one by typing:\n\"aa Add lead Name phone 9999999999\"";
+        if (locationFilter || budgetFilter) {
+          replyEmpty = `🤖 Bot: No leads found matching your filters: ${locationFilter ? `📍 Loc: ${locationFilter}` : ""} ${budgetFilter ? `💰 Budget: ${budgetFilter}` : ""}`;
+        }
         await sendOutboundReply(replyEmpty);
         return NextResponse.json({ status: "success", reply: replyEmpty });
       }
 
-      let replyMsg = `🤖 *Your CRM Leads List*\n\n`;
+      let replyMsg = `🤖 *Your CRM Leads List*\n`;
+      if (locationFilter || budgetFilter) {
+        replyMsg += `*(Filtered by: ${locationFilter ? locationFilter + " " : ""}${budgetFilter ? budgetFilter : ""})*\n\n`;
+      } else {
+        replyMsg += `\n`;
+      }
+      
       leads.forEach((l, idx) => {
         const emojiMap: Record<string, string> = {
           new: "🆕",
@@ -686,8 +993,21 @@ export async function POST(req: NextRequest) {
           lost: "❌"
         };
         const emoji = emojiMap[l.status] || "👤";
-        replyMsg += `${idx + 1}. ${emoji} *${l.name}* (${l.phone})\n   📍 Loc: ${l.location || "N/A"} | Req: ${l.requirement || "N/A"}\n   ⚡ Status: *${l.status.toUpperCase()}* | Budget: ${l.budget || "N/A"}\n\n`;
+        replyMsg += `${idx + 1}. ${emoji} *${l.name}* (${l.phone || "No phone"})`;
+        if (l.location || l.requirement) {
+          replyMsg += `\n   📍 Loc: ${l.location || "-"} | Req: ${l.requirement || "-"}`;
+        }
+        if (l.budget) {
+          replyMsg += `\n   💰 Budget: ${l.budget}`;
+        }
+        replyMsg += `\n   ⚡ Status: *${l.status.toUpperCase()}*\n\n`;
       });
+      
+      const isLeadsFiltered = locationFilter || budgetFilter;
+      if (!isLeadsFiltered && leads.length > 0) {
+        replyMsg += `\n🤖 *Filter these leads?*\nReply with a location (e.g. Kokapet) or budget (e.g. under 1cr) to filter.`;
+      }
+      
       await sendOutboundReply(replyMsg.trim());
       return NextResponse.json({ status: "success", reply: replyMsg.trim() });
     }
@@ -910,6 +1230,11 @@ export async function POST(req: NextRequest) {
         replyMsg += `${idx + 1}. ${statusEmoji} *${u.unit_name}* in *${projName}*\n📍 Loc: ${location} | Type: ${type.toUpperCase()}\n⚙️ Status: *${u.status.toUpperCase()}*\n${detailsStr}\n\n`;
       });
 
+      const isFiltered = commandLower.includes("plot") || commandLower.includes("villa") || commandLower.includes("apartment") || commandLower.includes("bhk") || commandLower.includes("kokapet") || commandLower.includes("gachibowli") || commandLower.includes("east") || commandLower.includes("north") || commandLower.includes("flat");
+      if (!isFiltered && filteredUnits.length > 0) {
+        replyMsg += `\n🤖 *Filter this list?*\nReply with your preferred location (e.g. Kokapet) or type (e.g. 3BHK) to filter.`;
+      }
+
       await sendOutboundReply(replyMsg.trim());
       return NextResponse.json({ status: "success", reply: replyMsg.trim() });
     }
@@ -1007,8 +1332,56 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ status: "success", reply: replyMsg.trim() });
     }
 
-    // 15. MY POINTS / XP BALANCE
-    if (commandLower === "my points" || commandLower === "points" || commandLower === "xp" || commandLower === "my xp") {
+    // 15. MY DOCS / DOCUMENTS INTENT
+    if (commandLower === "my docs" || commandLower === "documents" || commandLower === "my documents") {
+      // Fetch agent's own documents and builder brochures
+      const { data: agentDocs } = await supabase
+        .from("documents")
+        .select("name, type, url, created_at, projects(name)")
+        .eq("agent_id", profile.id)
+        .order("created_at", { ascending: false });
+
+      // Fetch builder docs (e.g. brochures, price lists, general docs) that are available to agents.
+      // Usually these have no agent_id or they are uploaded by builders. 
+      // Based on our schema, let's fetch documents where agent_id is null or type is brochure.
+      const { data: builderDocs } = await supabase
+        .from("documents")
+        .select("name, type, url, created_at, projects(name)")
+        .is("agent_id", null)
+        .order("created_at", { ascending: false });
+
+      if ((!agentDocs || agentDocs.length === 0) && (!builderDocs || builderDocs.length === 0)) {
+        const replyEmpty = "🤖 Bot: You have no documents saved in your vault, and no builder brochures are available.";
+        await sendOutboundReply(replyEmpty);
+        return NextResponse.json({ status: "success", reply: replyEmpty });
+      }
+
+      let replyMsg = `📁 *Your Document Vault*\n\n`;
+
+      if (agentDocs && agentDocs.length > 0) {
+        replyMsg += `*My Uploaded Documents:*\n`;
+        agentDocs.forEach((d, idx) => {
+          replyMsg += `${idx + 1}. 📄 *${d.name}* (${d.type})\n   🔗 Link: ${d.url}\n\n`;
+        });
+      }
+
+      if (builderDocs && builderDocs.length > 0) {
+        replyMsg += `*Builder Brochures & Shared Docs:*\n`;
+        builderDocs.forEach((d, idx) => {
+          const docProjects: any = d.projects;
+          const matchedProjName = Array.isArray(docProjects) ? docProjects[0]?.name : docProjects?.name;
+          const projName = matchedProjName ? ` - ${matchedProjName}` : "";
+          replyMsg += `${idx + 1}. 🏢 *${d.name}*${projName}\n   🔗 Link: ${d.url}\n\n`;
+        });
+      }
+
+      replyMsg += `👉 You can send any file here, and it will be safely stored in your vault!`;
+      await sendOutboundReply(replyMsg.trim());
+      return NextResponse.json({ status: "success", reply: replyMsg.trim() });
+    }
+
+    // 15. MY POINTS / XP BALANCE / REWARDS
+    if (commandLower === "my points" || commandLower === "points" || commandLower === "xp" || commandLower === "my xp" || commandLower === "rewards" || commandLower === "my rewards") {
       const { data: allAgents } = await supabase
         .from("profiles")
         .select("name, points")
