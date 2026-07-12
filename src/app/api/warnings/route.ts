@@ -13,20 +13,40 @@ export async function GET() {
     return NextResponse.json({ warnings: [] });
   }
 
-  // Get all warnings that target this user's role OR this user specifically
+  const fortyEightHoursAgo = new Date(Date.now() - 48 * 60 * 60 * 1000);
+
+  // 1. Get user profile registration date to filter out older messages for new users
+  const { data: userProfile } = await supabaseAdmin
+    .from("profiles")
+    .select("created_at")
+    .eq("id", session.sub)
+    .maybeSingle();
+
+  const userRegisteredAt = userProfile?.created_at 
+    ? new Date(userProfile.created_at) 
+    : new Date();
+
+  // 2. Get warnings created in the last 48 hours
   const { data: allWarnings, error } = await supabaseAdmin
     .from("warnings")
     .select("*")
+    .gte("created_at", fortyEightHoursAgo.toISOString())
     .order("created_at", { ascending: false });
 
   if (error || !allWarnings) {
     return NextResponse.json({ warnings: [] });
   }
 
-  // Filter warnings that apply to this user
+  // 3. Filter warnings applicable to this user and created after registration
   const applicableWarnings = allWarnings.filter((w: any) => {
     const targetRoles: string[] = w.target_roles || [];
     const targetUserIds: string[] = w.target_user_ids || [];
+
+    // Skip warning messages created before the user signed up
+    const warningCreatedAt = new Date(w.created_at);
+    if (warningCreatedAt.getTime() < userRegisteredAt.getTime()) {
+      return false;
+    }
 
     // Check if user's role is in target_roles
     const roleMatch = targetRoles.includes(session.role);
