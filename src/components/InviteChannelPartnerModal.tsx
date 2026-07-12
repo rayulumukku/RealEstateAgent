@@ -31,6 +31,7 @@ export default function InviteChannelPartnerModal({ isOpen, onClose, existingCon
   const [isLoadingAgents, setIsLoadingAgents] = useState(false);
   
   const [messageTemplate, setMessageTemplate] = useState("We are incredibly excited to invite you to join our exclusive Channel Partner network!");
+  const [rewardPoints, setRewardPoints] = useState(500);
   
   const [sending, setSending] = useState(false);
   const [sentSuccess, setSentSuccess] = useState(false);
@@ -120,7 +121,8 @@ export default function InviteChannelPartnerModal({ isOpen, onClose, existingCon
         body: JSON.stringify({
           builderPhone: phone,
           agentIds: Array.from(selectedAgentIds),
-          messageTemplate
+          messageTemplate,
+          rewardPoints
         })
       });
 
@@ -336,6 +338,21 @@ export default function InviteChannelPartnerModal({ isOpen, onClose, existingCon
                     ))
                   )}
                 </div>
+              </div>
+
+              {/* Reward Points */}
+              <div className="space-y-2">
+                <label className="block text-xs font-extrabold text-slate-700 uppercase tracking-wider">Reward Points for Accept</label>
+                <input 
+                  type="number"
+                  value={rewardPoints}
+                  onChange={(e) => setRewardPoints(Math.max(0, parseInt(e.target.value) || 0))}
+                  placeholder="e.g. 500"
+                  className="w-full bg-slate-50 border border-slate-200 focus:border-indigo-500 rounded-xl py-2.5 px-3 text-slate-850 outline-none text-sm font-medium transition"
+                />
+                <p className="text-[10px] text-slate-500 font-semibold italic">
+                  Points credited to agent's profile immediately upon accepting the invitation.
+                </p>
               </div>
 
               {/* Message Template */}

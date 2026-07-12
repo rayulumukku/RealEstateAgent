@@ -500,7 +500,7 @@ export async function POST(req: NextRequest) {
       // Find pending invitations for this agent
       const { data: invites, error: invitesErr } = await supabase
         .from("channel_partners")
-        .select("builder_id, status")
+        .select("builder_id, status, reward_points")
         .eq("agent_id", profile.id)
         .eq("status", "invited");
 
@@ -515,13 +515,15 @@ export async function POST(req: NextRequest) {
             .eq("agent_id", profile.id)
             .eq("builder_id", invite.builder_id);
             
-          // Reward agent
+          // Reward agent with builder's configured reward points
+          const pointsReward = invite.reward_points !== undefined && invite.reward_points !== null ? invite.reward_points : 500;
+          
           await supabase
             .from("profiles")
-            .update({ points: (profile.points || 0) + 100 })
+            .update({ points: (profile.points || 0) + pointsReward })
             .eq("id", profile.id);
 
-          const replyMsg = `🎉 *Awesome!*\n\nYou are now an official Channel Partner.\n\n💰 We have credited *100 bonus credits* to your account!`;
+          const replyMsg = `🎉 *Awesome!*\n\nYou are now an official Channel Partner.\n\n💰 We have credited *${pointsReward} bonus credits* to your account!`;
           await sendOutboundReply(replyMsg);
           return NextResponse.json({ status: "success", reply: replyMsg });
         } else {

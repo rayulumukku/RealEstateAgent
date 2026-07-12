@@ -11,7 +11,7 @@ function formatPhone(raw: string): string {
 
 export async function POST(req: Request) {
   try {
-    const { builderPhone, agentIds, messageTemplate } = await req.json();
+    const { builderPhone, agentIds, messageTemplate, rewardPoints } = await req.json();
 
     if (!builderPhone) {
       return NextResponse.json({ success: false, error: "Missing builder phone" });
@@ -46,16 +46,17 @@ export async function POST(req: Request) {
       return NextResponse.json({ success: true, count: 0 });
     }
 
+    const pointsAmount = typeof rewardPoints === "number" ? rewardPoints : parseInt(rewardPoints) || 500;
+
     // Bulk insert invitations in `channel_partners`
     const insertPayload = agents.map(agent => ({
       builder_id: builder.id,
       agent_id: agent.id,
-      status: "invited"
+      status: "invited",
+      reward_points: pointsAmount
     }));
 
     // We use upsert so we don't fail if they were already invited/connected before
-    // though in real life we might want to check existing status first.
-    // Assuming status transitions are handled.
     const { error: insertErr } = await supabase
       .from("channel_partners")
       .upsert(insertPayload, { onConflict: "builder_id,agent_id" });
@@ -66,7 +67,6 @@ export async function POST(req: Request) {
     }
 
     // Send WhatsApp messages (Simulated via webhook endpoint if using sandbox)
-    // Or normally we'd hit GallaBox / Meta API here.
     const builderName = builder.agency_name || builder.name || "A Premium Builder";
     
     for (const agent of agents) {
@@ -74,11 +74,7 @@ export async function POST(req: Request) {
       
       const customMessage = messageTemplate ? messageTemplate.replace("[Builder Name]", builderName).replace("[Agent Name]", agent.name) : `*${builderName}* is inviting you to become an official Channel Partner!`;
       
-      const message = `Hi ${agent.name},\n\n${customMessage}\n\nReply *Yes* to accept and earn 100 bonus credits, or *No* to decline.`;
-      
-      // Simulate sending via our local webhook or GallaBox logic
-      // In a real app we'd call the Meta Graph API here.
-      // We will assume that if we are using the sandbox, they will see it.
+      const message = `Hi ${agent.name},\n\n${customMessage}\n\nReply *Yes* to accept and earn ${pointsAmount} bonus credits, or *No* to decline.`;
       
       const formattedPhone = formatPhone(agent.phone);
       
