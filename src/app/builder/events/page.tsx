@@ -53,8 +53,8 @@ export default function BuilderEventsHistory() {
     setLoadingFollowers(true);
     setFollowersSearch("");
     try {
-      const res = await getFollowersForEntity(id, type);
-      if (res.success && res.followers) {
+      const res = await getFollowersForEntity(id, type, name);
+      if (res.ok && res.followers) {
         setFollowersList(res.followers);
       } else {
         setFollowersList([]);
