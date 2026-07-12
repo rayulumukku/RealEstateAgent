@@ -114,6 +114,19 @@ export default function AgentDirectory() {
     loadAgents();
   }, []);
 
+  // Prevent main layout container scrolling and lock agent list scrolling
+  useEffect(() => {
+    const mainEl = document.querySelector("main");
+    if (mainEl) {
+      mainEl.style.overflow = "hidden";
+    }
+    return () => {
+      if (mainEl) {
+        mainEl.style.overflow = "auto";
+      }
+    };
+  }, []);
+
   const uniqueLocations = Array.from(
     new Set(agents.map((a) => a.location?.trim()).filter(Boolean))
   ).sort();
@@ -137,7 +150,7 @@ export default function AgentDirectory() {
   const pendingCount = Object.values(connections).filter(s => s === "invited").length;
 
   return (
-    <div className="space-y-6 text-slate-800">
+    <div className="h-[calc(100vh-64px)] flex flex-col space-y-6 text-slate-800 overflow-hidden pb-4">
       {/* Header */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-200 pb-5">
         <div>
@@ -260,16 +273,18 @@ export default function AgentDirectory() {
         </div>
       </div>
 
-      {/* Loader */}
-      {loading && (
-        <div className="flex items-center space-x-2 text-xs font-bold text-slate-400 uppercase tracking-wider justify-center py-12">
-          <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
-          <span>Loading partner list...</span>
-        </div>
-      )}
+      {/* Scrollable Container for Loader & List of Agents */}
+      <div className="flex-1 min-h-0 overflow-y-auto pr-1">
+        {/* Loader */}
+        {loading && (
+          <div className="flex items-center space-x-2 text-xs font-bold text-slate-400 uppercase tracking-wider justify-center py-12">
+            <Loader2 className="w-5 h-5 animate-spin text-indigo-600" />
+            <span>Loading partner list...</span>
+          </div>
+        )}
 
-      {/* List of Agents */}
-      {!loading && (
+        {/* List of Agents */}
+        {!loading && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
           {filteredAgents.length === 0 ? (
             <div className="bg-slate-50 border-slate-200 border-dashed rounded-2xl p-12 text-center text-slate-400 m-4">
@@ -434,6 +449,7 @@ export default function AgentDirectory() {
           )}
         </div>
       )}
+      </div>
 
       <InviteChannelPartnerModal 
         isOpen={isInviteModalOpen} 
