@@ -68,17 +68,36 @@ export default function BuilderEventsHistory() {
 
       const { data: profileData } = await supabase
         .from("profiles")
-        .select("id")
+        .select("id, parent_id")
         .eq("phone", phone)
         .single();
 
       if (!profileData) return;
 
+      const builderIds = [profileData.id];
+      if (profileData.parent_id) {
+        builderIds.push(profileData.parent_id);
+      }
+
+      // Query sub-builders
+      const { data: subBuilders } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("parent_id", profileData.id);
+
+      if (subBuilders) {
+        subBuilders.forEach((sub: any) => {
+          if (!builderIds.includes(sub.id)) {
+            builderIds.push(sub.id);
+          }
+        });
+      }
+
       // Load campaigns
       const { data: campaignsData } = await supabase
         .from("campaigns")
         .select("*")
-        .eq("builder_id", profileData.id)
+        .in("builder_id", builderIds)
         .order("created_at", { ascending: false });
 
       if (campaignsData) setCampaigns(campaignsData);
